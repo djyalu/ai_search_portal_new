@@ -80,55 +80,64 @@ function App() {
     const html = marked.parse(content || '');
     return (
       <div
-        className="prose prose-invert prose-indigo max-w-none 
-                   prose-headings:text-indigo-400 prose-headings:font-bold 
-                   prose-p:text-slate-300 prose-p:leading-relaxed
-                   prose-table:border prose-table:border-slate-800
-                   prose-th:bg-slate-900 prose-th:p-2 prose-td:p-2 prose-td:border-t prose-td:border-slate-800"
+        className="prose prose-slate dark:prose-invert prose-indigo max-w-none 
+                   prose-headings:text-indigo-600 dark:prose-headings:text-indigo-400 prose-headings:font-bold 
+                   prose-p:text-slate-700 dark:prose-p:text-slate-300 prose-p:leading-relaxed
+                   prose-table:border prose-table:border-slate-200 dark:prose-table:border-slate-800
+                   prose-th:bg-slate-50 dark:prose-th:bg-slate-900 prose-th:p-2 prose-td:p-2 prose-td:border-t prose-td:border-slate-200 dark:prose-td:border-slate-800"
         dangerouslySetInnerHTML={{ __html: html }}
       />
     );
   };
 
   return (
-    <div className="min-h-screen bg-[#0a0a0c] text-slate-200 p-4 md:p-8 font-sans selection:bg-indigo-500/30">
+    <div className={`min-h-screen transition-colors duration-300 ${theme === 'dark' ? 'bg-[#0a0a0c] text-slate-200' : 'bg-slate-50 text-slate-900'} p-4 md:p-8 font-sans selection:bg-indigo-500/30`}>
       <div className="max-w-6xl mx-auto space-y-8">
 
         {/* Header */}
         <header className="flex flex-col md:flex-row items-center justify-between gap-4 mb-8">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-indigo-600 rounded-lg shadow-lg shadow-indigo-500/20">
-              <Bot className="w-8 h-8 text-white" />
+            <div className="bg-indigo-600 rounded-xl shadow-lg shadow-indigo-500/30 overflow-hidden flex items-center justify-center border border-indigo-400/20">
+              <img src="/favicon.png" alt="Logo" className="w-12 h-12 object-cover scale-110" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
+              <h1 className="text-2xl font-bold bg-gradient-to-r from-indigo-500 to-purple-500 dark:from-indigo-400 dark:to-purple-400 bg-clip-text text-transparent">
                 Multi-GPT Agency
               </h1>
-              <p className="text-xs text-slate-500 uppercase tracking-widest font-semibold tracking-wider">Agency-based Cross-Validation</p>
+              <p className="text-xs text-slate-400 dark:text-slate-500 uppercase tracking-widest font-semibold tracking-wider">Unified Analytics Platform</p>
             </div>
           </div>
 
-          <div className="flex-1 max-w-xl w-full relative group">
-            <div className="absolute -inset-0.5 bg-gradient-to-r from-indigo-600 to-purple-600 rounded-xl blur opacity-20 group-hover:opacity-40 transition duration-500"></div>
-            <div className="relative flex bg-[#16161a] rounded-xl border border-slate-800 p-1.5 overflow-hidden">
-              <input
-                type="text"
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                placeholder="상호 검증이 필요한 질문을 입력하세요..."
-                className="flex-1 bg-transparent border-none outline-none px-4 py-2 text-sm placeholder-slate-600"
-                onKeyDown={(e) => e.key === 'Enter' && handleAnalyze()}
-                disabled={isAnalyzing}
-              />
-              <button
-                onClick={handleAnalyze}
-                disabled={isAnalyzing}
-                className="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2 rounded-lg font-medium transition-all flex items-center gap-2 disabled:bg-slate-800 disabled:text-slate-500"
-              >
-                {isAnalyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                <span>분석 실행</span>
-              </button>
+          <div className="flex-1 max-w-xl w-full flex items-center gap-4">
+            <div className="flex-1 relative group">
+              <div className="absolute -inset-0.5 bg-gradient-to-r from-indigo-600 to-purple-600 rounded-xl blur opacity-10 group-hover:opacity-30 transition duration-500"></div>
+              <div className="relative flex bg-white dark:bg-[#16161a] rounded-xl border border-slate-200 dark:border-slate-800 p-1.5 shadow-xl dark:shadow-2xl">
+                <input
+                  type="text"
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  placeholder="질문을 입력하세요..."
+                  className="flex-1 bg-transparent border-none outline-none px-4 py-2 text-sm placeholder-slate-400 dark:placeholder-slate-600 text-slate-900 dark:text-slate-200"
+                  onKeyDown={(e) => e.key === 'Enter' && handleAnalyze()}
+                  disabled={isAnalyzing}
+                />
+                <button
+                  onClick={handleAnalyze}
+                  disabled={isAnalyzing}
+                  className="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2 rounded-lg font-medium transition-all flex items-center gap-2 disabled:bg-slate-100 dark:disabled:bg-slate-800 disabled:text-slate-400"
+                >
+                  {isAnalyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                  <span>분석</span>
+                </button>
+              </div>
             </div>
+
+            <button
+              onClick={toggleTheme}
+              className="p-3 rounded-xl bg-white dark:bg-[#16161a] border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:text-indigo-500 transition-colors shadow-lg"
+            >
+              {theme === 'dark' ? <Zap className="w-5 h-5" /> : <Clock className="w-5 h-5 text-amber-500" />}
+            </button>
           </div>
         </header>
 
@@ -136,34 +145,39 @@ function App() {
 
           {/* Timeline Section */}
           <aside className="lg:col-span-3 space-y-4">
-            <div className="bg-[#121216] border border-slate-800 rounded-2xl p-4 h-[600px] flex flex-col shadow-xl">
-              <div className="flex items-center gap-2 mb-4 border-b border-slate-800 pb-3">
-                <Clock className="w-4 h-4 text-indigo-400" />
-                <h2 className="text-sm font-bold text-slate-300">실시간 타임라인</h2>
+            <div className="bg-white dark:bg-[#121216]/80 backdrop-blur-xl border border-slate-200 dark:border-slate-800/50 rounded-2xl p-5 h-[650px] flex flex-col shadow-xl dark:shadow-2xl sticky top-8">
+              <div className="flex items-center gap-2 mb-6 border-b border-slate-100 dark:border-slate-800 pb-4">
+                <Clock className="w-4 h-4 text-indigo-500 dark:text-indigo-400" />
+                <h2 className="text-sm font-bold text-slate-600 dark:text-slate-300">작업 타임라인</h2>
               </div>
-              <div className="flex-1 overflow-y-auto space-y-4 pr-1 custom-scrollbar">
+              <div className="flex-1 overflow-y-auto space-y-6 pr-1 custom-scrollbar">
                 {timeline.length === 0 && !isAnalyzing && (
-                  <div className="text-center py-12 text-slate-600 space-y-2">
-                    <Zap className="w-10 h-10 mx-auto opacity-10" />
-                    <p className="text-xs">프롬프트를 입력하면<br />분석 과정이 표시됩니다.</p>
+                  <div className="text-center py-20 text-slate-300 dark:text-slate-700 space-y-3">
+                    <Zap className="w-12 h-12 mx-auto opacity-10" />
+                    <p className="text-xs font-medium italic">에이전트 대기 중...</p>
                   </div>
                 )}
-                {timeline.map((step, idx) => (
-                  <motion.div
-                    initial={{ opacity: 0, x: -10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    key={idx}
-                    className="relative pl-6 border-l border-slate-800"
-                  >
-                    <div className="absolute left-[-5px] top-1 w-2.5 h-2.5 rounded-full bg-indigo-500 shadow-[0_0_8px_rgba(99,102,241,0.6)]"></div>
-                    <p className="text-[11px] text-slate-500">{step.time}</p>
-                    <p className="text-xs font-medium text-slate-300 mt-1 leading-snug">{step.message}</p>
-                  </motion.div>
-                ))}
+                <div className="relative">
+                  {timeline.map((step, idx) => (
+                    <motion.div
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      key={idx}
+                      className="relative pl-7 pb-6 group"
+                    >
+                      {idx !== timeline.length - 1 && (
+                        <div className="absolute left-[5.5px] top-4 w-[1px] h-full bg-slate-100 dark:bg-slate-800"></div>
+                      )}
+                      <div className="absolute left-0 top-1.5 w-3 h-3 rounded-full bg-indigo-100 dark:bg-indigo-500/20 border border-indigo-500 group-last:bg-indigo-500 group-last:shadow-[0_0_12px_rgba(99,102,241,0.8)]"></div>
+                      <p className="text-[10px] text-slate-400 dark:text-slate-500 font-mono mb-1">{step.time}</p>
+                      <p className="text-xs font-medium text-slate-700 dark:text-slate-200 leading-snug">{step.message}</p>
+                    </motion.div>
+                  ))}
+                </div>
                 {isAnalyzing && (
-                  <div className="flex items-center gap-2 pl-6 text-indigo-400">
+                  <div className="flex items-center gap-2 pl-7 text-indigo-600 dark:text-indigo-400 font-medium">
                     <Loader2 className="w-3 h-3 animate-spin" />
-                    <span className="text-[10px] animate-pulse">에이전트 작업 중...</span>
+                    <span className="text-[10px] tracking-wide italic">인텔리전스 엔진 가동 중...</span>
                   </div>
                 )}
                 <div ref={timelineEndRef} />
@@ -296,9 +310,14 @@ function App() {
                 )}
 
                 {!isAnalyzing && !results && (
-                  <div className="flex flex-col items-center justify-center h-full text-slate-700 py-32 border-2 border-dashed border-slate-900 rounded-3xl">
-                    <Bot className="w-16 h-16 opacity-10 mb-4" />
-                    <p className="text-sm font-medium">검증할 프롬프트를 상단에 입력해 주세요.</p>
+                  <div className="flex flex-col items-center justify-center flex-1 text-slate-700 py-32 border border-slate-200 dark:border-slate-800/50 rounded-[3rem] bg-white dark:bg-[#121216]/10 shadow-inner dark:shadow-none">
+                    <motion.div
+                      animate={{ y: [0, -10, 0] }}
+                      transition={{ duration: 4, repeat: Infinity }}
+                    >
+                      <Bot className="w-20 h-20 opacity-5 mb-6 text-slate-900 dark:text-white" />
+                    </motion.div>
+                    <p className="text-sm font-semibold tracking-wider text-slate-400 dark:text-slate-500 uppercase">Input a prompt to begin deep analysis</p>
                   </div>
                 )}
               </AnimatePresence>
@@ -313,8 +332,14 @@ function App() {
         __html: `
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #2d2d39; border-radius: 10px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: ${theme === 'dark' ? '#1e1e24' : '#e2e8f0'}; border-radius: 10px; }
         .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #4f46e5; }
+        
+        /* Markdown Responsive Tables */
+        .prose table { display: block; width: 100%; border-collapse: collapse; overflow-x: auto; margin: 1.5rem 0; }
+        .prose th, .prose td { padding: 12px 16px; border: 1px solid ${theme === 'dark' ? '#2d2d39' : '#e2e8f0'}; text-align: left; font-size: 0.875rem; }
+        .prose th { background: ${theme === 'dark' ? '#16161a' : '#f8fafc'}; font-weight: 700; color: ${theme === 'dark' ? '#818cf8' : '#4f46e5'}; }
+        .prose tr:nth-child(even) { background: ${theme === 'dark' ? '#121216' : '#fcfcfd'}; }
       `}} />
     </div>
   );
