@@ -12,10 +12,10 @@ const USER_DATA_DIR = path.join(__dirname, 'user_data_session');
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 /**
- * Robust Loop-based Wait Function for Playwright
+ * Robust Loop-based Wait Function for Playwright with Real-time Chunking
  */
-async function waitForResponseStability(page, selectors, minLength = 20, stabilityDuration = 3000, maxWait = 90000) {
-    let stableCount = 6; // 6 * 500ms = 3s
+async function waitForResponseStability(page, selectors, onChunk, minLength = 20, maxWait = 90000) {
+    let stableCount = 6;
     let lastLength = 0;
     const startTime = Date.now();
     const selectorArr = Array.isArray(selectors) ? selectors : [selectors];
@@ -38,47 +38,36 @@ async function waitForResponseStability(page, selectors, minLength = 20, stabili
                 return { length: maxLength, text: bestText };
             }, selectorArr);
 
-            if (payload.length > minLength) {
-                if (payload.length === lastLength && payload.length > 0) {
-                    stableCount--;
-                } else {
-                    stableCount = 6;
-                    lastLength = payload.length;
-                }
+            if (payload.length > 0 && payload.length !== lastLength) {
+                onChunk(payload.text);
+                lastLength = payload.length;
+                stableCount = 6;
+            } else if (payload.length > minLength && payload.length === lastLength) {
+                stableCount--;
             }
 
-            if (stableCount <= 0) return payload.text;
+            if (stableCount <= 0 && payload.length > minLength) return payload.text;
         } catch (e) {
-            // Ignore temporary evaluation errors during navigation/re-rendering
+            // Ignore eval errors
         }
         await delay(500);
     }
-
-    console.log(`[Playwright Wait] Stability timeout for: ${selectorArr.join(', ')}`);
-    return "Response capture timeout or insufficient length.";
+    return "Response capture timeout.";
 }
 
 export async function runExhaustiveAnalysis(prompt, onProgress) {
     let browserContext;
     try {
-        onProgress({ status: 'system_init', message: '브라우저 엔진 최적화 및 에이전시 세션 활성화 중...' });
+        onProgress({ status: 'system_init', message: '에이전시 병렬 프로세스 최적화 중...' });
 
         browserContext = await chromium.launchPersistentContext(USER_DATA_DIR, {
             channel: 'msedge',
             headless: false,
             viewport: null,
             ignoreDefaultArgs: ['--enable-automation'],
-            args: [
-                '--start-maximized',
-                '--no-sandbox',
-                '--disable-gpu',
-                '--disable-blink-features=AutomationControlled'
-            ],
-            slowMo: 30
+            args: ['--start-maximized', '--no-sandbox', '--disable-blink-features=AutomationControlled'],
+            slowMo: 20
         });
-
-        // Step 1: Parallel Gathering
-        onProgress({ status: 'step1_gathering', message: '4대 AI 에이전트에게 동시 질문을 전송했습니다 (병렬 모드)...' });
 
         const tasks = [
             { name: 'Perplexity', fn: runPerplexity },
@@ -87,174 +76,124 @@ export async function runExhaustiveAnalysis(prompt, onProgress) {
             { name: 'Claude', fn: runClaude }
         ];
 
+        onProgress({ status: 'step1_gathering', message: '4개 AI 에이전트 동시 분석 시작...' });
+
         const initialResultsRaw = await Promise.all(tasks.map(async (task) => {
             try {
-                onProgress({ status: `${task.name.toLowerCase()}_start`, message: `${task.name} 에이전트가 분석을 시작했습니다.` });
-                const text = await task.fn(browserContext, prompt);
-                onProgress({ status: `${task.name.toLowerCase()}_done`, message: `${task.name} 답변 수집 완료!` });
+                const text = await task.fn(browserContext, prompt, (chunk) => {
+                    onProgress({
+                        status: 'streaming',
+                        service: task.name.toLowerCase(),
+                        content: chunk
+                    });
+                });
+                onProgress({ status: `${task.name.toLowerCase()}_done`, message: `${task.name} 완료` });
                 return { name: task.name, text };
             } catch (error) {
-                onProgress({ status: `${task.name.toLowerCase()}_error`, message: `${task.name} 오류 발생: ${error.message}` });
-                return { name: task.name, text: `Failed to fetch: ${error.message}` };
+                return { name: task.name, text: `Error: ${error.message}` };
             }
         }));
 
         const resultsMap = {};
         initialResultsRaw.forEach(r => resultsMap[r.name.toLowerCase()] = r.text);
 
-        // Step 2: Cross-Validation (Claude preferred for reasoning)
-        onProgress({ status: 'step2_validation', message: '수집된 데이터를 바탕으로 상호 교차 검증을 시작합니다...' });
-
+        onProgress({ status: 'step2_validation', message: '상호 교차 검증 생성 중...' });
         const combinedInitial = initialResultsRaw.map(r => `[${r.name}]: ${r.text}`).join('\n\n');
-        const validationPrompt = `
-        당신은 전문 분석가입니다. 아래는 동일한 질문("${prompt}")에 대해 4개의 AI가 내놓은 답변들입니다.
-        각 답변의 정확성, 논리성, 최신성을 객관적으로 평가하고 서로 보완해야 할 점을 분석해주세요.
-        
-        ${combinedInitial}
-        `.substring(0, 15000);
 
-        let validationReview = await runClaude(browserContext, validationPrompt).catch(() => null);
+        let validationReview = await runClaude(browserContext, `분석해줘:\n${combinedInitial}`, (chunk) => {
+            onProgress({ status: 'streaming', service: 'validation', content: chunk });
+        }).catch(() => "Claude 검증 실패");
 
-        if (!validationReview || validationReview.length < 100) {
-            onProgress({ status: 'validating_fallback', message: '검증 리포트 보강 중 (Perplexity 에이전트 투입)...' });
-            validationReview = await runPerplexity(browserContext, validationPrompt).catch(() => "상호 검증 리포트를 생성할 수 없습니다.");
-        }
-
-        // Step 3: Final Synthesis
-        onProgress({ status: 'step3_synthesis', message: '최종 인텔리전스 리포트를 구성하고 있습니다...' });
-
-        const synthesisPrompt = `
-        질문: "${prompt}"
-        당신은 4개의 AI의 답변을 분석하여 최고의 통찰을 제공하는 Senior AI Agent입니다.
-        구조화된 마크다운으로 답변해주세요.
-        
-        초기 답변들:
-        ${combinedInitial}
-        
-        상호 검증 내용:
-        ${validationReview}
-        `.substring(0, 15000);
-
-        const optimalAnswer = await runPerplexity(browserContext, synthesisPrompt, 120000).catch(() => "최종 답변 도출 실패");
+        onProgress({ status: 'step3_synthesis', message: '최종 인텔리전스 도출 중...' });
+        const optimalAnswer = await runPerplexity(browserContext, `요약해줘:\n${combinedInitial}\n\n보고서:\n${validationReview}`, (chunk) => {
+            onProgress({ status: 'streaming', service: 'optimal', content: chunk });
+        }).catch(() => "최종 요약 실패");
 
         return {
             results: resultsMap,
             validationReport: validationReview,
             optimalAnswer: optimalAnswer,
-            heroImage: "https://images.unsplash.com/photo-1620712943543-bcc4688e7485?auto=format&fit=crop&q=80&w=1000"
+            summary: optimalAnswer
         };
 
     } finally {
         if (browserContext) {
-            // Give a small delay before closing to ensure all packets are sent
-            await delay(1000);
+            await delay(2000);
             await browserContext.close();
         }
     }
 }
 
-async function runPerplexity(context, prompt, maxWait = 90000) {
+async function runPerplexity(context, prompt, onChunk) {
     const page = await context.newPage();
     try {
-        await page.goto('https://www.perplexity.ai/', { waitUntil: 'domcontentloaded', timeout: 60000 });
-        const inputSelector = 'textarea, [contenteditable="true"]';
-        await page.waitForSelector(inputSelector, { timeout: 20000 });
+        await page.goto('https://www.perplexity.ai/', { waitUntil: 'domcontentloaded' });
+        const inputSelector = 'textarea';
+        await page.waitForSelector(inputSelector);
         await page.fill(inputSelector, prompt);
-        await delay(300);
         await page.keyboard.press('Enter');
-        return await waitForResponseStability(page, ['.prose', '[class*="prose"]', '.default-article'], 50, 3000, maxWait);
+        return await waitForResponseStability(page, ['.prose'], onChunk);
     } finally { await page.close(); }
 }
 
-async function runChatGPT(context, prompt) {
+async function runChatGPT(context, prompt, onChunk) {
     const page = await context.newPage();
     try {
-        await page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded', timeout: 60000 });
+        await page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded' });
         const inputSelector = '#prompt-textarea';
-        await page.waitForSelector(inputSelector, { timeout: 20000 });
+        await page.waitForSelector(inputSelector);
         await page.fill(inputSelector, prompt);
-        await delay(300);
         await page.keyboard.press('Enter');
-        return await waitForResponseStability(page, ['.markdown', 'article', '.prose'], 50);
+        return await waitForResponseStability(page, ['.markdown', 'article'], onChunk);
     } finally { await page.close(); }
 }
 
-async function runGemini(context, prompt) {
+async function runGemini(context, prompt, onChunk) {
     const page = await context.newPage();
     try {
-        await page.goto('https://gemini.google.com/app', { waitUntil: 'domcontentloaded', timeout: 60000 });
-        const inputSelector = 'div[contenteditable="true"], [aria-label="채팅 입력"], [aria-label="Prompt"]';
-        await page.waitForSelector(inputSelector, { timeout: 25000 });
+        await page.goto('https://gemini.google.com/app', { waitUntil: 'domcontentloaded' });
+        const inputSelector = 'div[contenteditable="true"]';
+        await page.waitForSelector(inputSelector);
         await page.click(inputSelector);
-        await page.keyboard.type(prompt, { delay: 5 });
-        await delay(300);
+        await page.keyboard.type(prompt);
         await page.keyboard.press('Enter');
-        await delay(3000); // Wait for Gemini to start thinking
-        return await waitForResponseStability(page, ['model-response', '.message-content', '.chat-content', '.response-container-inner'], 50);
+        await delay(2000);
+        return await waitForResponseStability(page, ['model-response'], onChunk);
     } finally { await page.close(); }
 }
 
-async function runClaude(context, prompt) {
+async function runClaude(context, prompt, onChunk) {
     const page = await context.newPage();
     try {
-        await page.goto('https://claude.ai/new', { waitUntil: 'domcontentloaded', timeout: 60000 });
-        const inputSelector = 'div[contenteditable="true"], [aria-label="Write user message"], .ProseMirror';
-        await page.waitForSelector(inputSelector, { timeout: 25000 });
+        await page.goto('https://claude.ai/new', { waitUntil: 'domcontentloaded' });
+        const inputSelector = 'div[contenteditable="true"]';
+        await page.waitForSelector(inputSelector);
         await page.click(inputSelector);
-        await page.keyboard.type(prompt, { delay: 5 });
-        await delay(300);
-
-        const sendBtn = await page.$('button[aria-label="Send Message"], button[aria-label="Send message"]');
-        if (sendBtn && await sendBtn.isEnabled()) {
-            await sendBtn.click();
-        } else {
-            await page.keyboard.press('Enter');
-        }
-        await delay(4000);
-        return await waitForResponseStability(page, ['.font-claude-message', '[data-testid="message-content"]', '.message-content'], 50);
+        await page.keyboard.type(prompt);
+        await page.keyboard.press('Enter');
+        await delay(2000);
+        return await waitForResponseStability(page, ['.font-claude-message'], onChunk);
     } finally { await page.close(); }
 }
 
 export async function saveToNotion(prompt, optimalAnswer, results) {
+    // Legacy support or Browser-based Notion Save (User's preferred method from Phase 11)
     let browserContext;
     try {
         browserContext = await chromium.launchPersistentContext(USER_DATA_DIR, { headless: false, channel: 'msedge' });
         const page = await browserContext.newPage();
         await page.goto("https://www.notion.so/", { waitUntil: 'networkidle' });
-        await page.waitForSelector('.notion-sidebar-container', { timeout: 40000 });
-
-        await page.keyboard.down('Control');
-        await page.keyboard.press('n');
-        await page.keyboard.up('Control');
-        await delay(2500);
-
-        await page.keyboard.type(`[AI분석] ${prompt.substring(0, 50)}...`);
+        await page.keyboard.down('Control'); await page.keyboard.press('n'); await page.keyboard.up('Control');
+        await delay(2000);
+        await page.keyboard.type(`[AI분석] ${prompt.substring(0, 30)}`);
         await page.keyboard.press('Enter');
-        await delay(1500);
-
-        let markdown = `# AI Search Agency Analysis Report\n\n`;
-        markdown += `## 💡 Original Prompt\n> ${prompt}\n\n---\n\n`;
-        markdown += `## 🏆 Integrated Intelligence Result\n\n${optimalAnswer}\n\n---\n\n`;
-        markdown += `## 🔍 Individual AI Agent Data\n\n`;
-        for (const [ai, text] of Object.entries(results)) {
-            markdown += `### ${ai.toUpperCase()}\n${text}\n\n`;
-        }
-
-        await page.evaluate((text) => {
-            const el = document.createElement('textarea');
-            el.value = text;
-            document.body.appendChild(el); el.select();
-            document.execCommand('copy');
-            document.body.removeChild(el);
-        }, markdown);
-
-        await page.keyboard.down('Control');
-        await page.keyboard.press('v');
-        await page.keyboard.up('Control');
-
-        await delay(4000);
+        let md = `## Result\n\n${optimalAnswer}`;
+        await page.evaluate((t) => {
+            const el = document.createElement('textarea'); el.value = t; document.body.appendChild(el);
+            el.select(); document.execCommand('copy'); document.body.removeChild(el);
+        }, md);
+        await page.keyboard.down('Control'); await page.keyboard.press('v'); await page.keyboard.up('Control');
+        await delay(3000);
         return { success: true, url: page.url() };
-    } finally {
-        if (browserContext) await browserContext.close();
-    }
+    } finally { if (browserContext) await browserContext.close(); }
 }
