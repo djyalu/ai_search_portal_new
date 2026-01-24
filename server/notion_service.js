@@ -55,18 +55,23 @@ const NotionService = {
                 type: 'heading_3',
                 heading_3: { rich_text: [{ type: 'text', text: { content: ai.toUpperCase() } }] },
             });
-            blocks.push({
-                object: 'block',
-                type: 'paragraph',
-                paragraph: {
-                    rich_text: [{
-                        type: 'text',
-                        text: {
-                            content: typeof content === 'string' ? content.substring(0, 2000) : '데이터 없음'
-                        }
-                    }]
-                },
-            });
+
+            const safeContent = typeof content === 'string' ? content : '데이터 없음';
+            const chunkSize = 2000;
+
+            for (let i = 0; i < safeContent.length; i += chunkSize) {
+                const chunk = safeContent.substring(i, i + chunkSize);
+                blocks.push({
+                    object: 'block',
+                    type: 'paragraph',
+                    paragraph: {
+                        rich_text: [{
+                            type: 'text',
+                            text: { content: chunk }
+                        }]
+                    },
+                });
+            }
         });
 
         try {

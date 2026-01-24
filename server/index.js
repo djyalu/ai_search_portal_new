@@ -1,6 +1,8 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import fs from 'fs';
+import path from 'path';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import { runExhaustiveAnalysis, saveToNotion } from './playwright_handler.js';
@@ -9,6 +11,17 @@ import HistoryDB from './history_db.js';
 dotenv.config();
 
 const app = express();
+const LOG_PATH = path.join(process.cwd(), 'server.log');
+
+function log(...args) {
+    try {
+        const line = args.map(a => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
+        fs.appendFileSync(LOG_PATH, `${new Date().toISOString()} ` + line + '\n');
+    } catch (e) {
+        // ignore logging errors
+    }
+    console.log(...args);
+}
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
     cors: {
@@ -47,16 +60,23 @@ app.post('/api/notion/save', async (req, res) => {
         const response = await saveToNotion(prompt, summary, results);
         res.json({ success: true, url: response.url });
     } catch (error) {
-        console.error(error);
+        log('ERROR', error);
         res.status(500).json({ error: error.message || 'Failed to save to Notion' });
     }
 });
 
 io.on('connection', (socket) => {
-    console.log('Client connected:', socket.id);
+    log('Client connected:', socket.id);
 
     socket.on('start-analysis', async (prompt) => {
-        console.log(`Starting analysis for: ${prompt}`);
+        if (app.locals.isAnalyzing) {
+            socket.emit('error', '현재 다른 분석 작업이 진행 중입니다. 잠시 후 다시 시도해주세요.');
+            return;
+        }
+
+        log(`Starting analysis for: ${prompt}`);
+        app.locals.isAnalyzing = true;
+
         try {
             const results = await runExhaustiveAnalysis(prompt, (step) => {
                 socket.emit('progress', step);
@@ -67,16 +87,18 @@ io.on('connection', (socket) => {
 
             socket.emit('completed', results);
         } catch (error) {
-            console.error(error);
+            log('ERROR', error);
             socket.emit('error', `Analysis failed: ${error.message}`);
+        } finally {
+            app.locals.isAnalyzing = false;
         }
     });
 
     socket.on('disconnect', () => {
-        console.log('Client disconnected');
+        log('Client disconnected');
     });
 });
 
 httpServer.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    log(`Server running on http://localhost:${PORT}`);
 });
