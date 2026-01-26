@@ -22,7 +22,13 @@ build/
 server/user_data/
 server/user_data_playwright/
 server/user_data_session/
+server/user_data_session_*/
 server/history.db
+
+# Debug artifacts / logs
+server/server.log
+server/playwright-debug-*.html
+server/playwright-debug-*.png
 
 # Logs
 npm-debug.log*
