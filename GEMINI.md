@@ -101,3 +101,13 @@
 - **Date**: 2026-01-24
 - **Action**: Implemented global analysis locking in `index.js` to prevent race conditions. Enhanced Notion export in `notion_service.js` with content chunking for long texts. Refined `playwright_handler.js` with robust selectors, better timeout handling, and improved resource cleanup logic.
 - **Status**: Completed
+
+### Phase 17: Server Execution & Session Verification
+- **Date**: 2026-01-28
+- **Action**: Starting backend and frontend servers. Verifying Playwright session stability.
+- **Status**: Completed
+
+### Phase 18: UI Redesign (Lab + Analytics Style)
+- **Date**: 2026-01-28
+- **Action**: Implementing a major UI overhaul based on `docs/UI-REDESIGN.md`. Introducing a sidebar-based layout, new color tokens, and enhanced comparison widgets.
+- **Status**: Completed

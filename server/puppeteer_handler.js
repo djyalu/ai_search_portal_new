@@ -293,79 +293,9 @@ async function runClaude(browser, prompt) {
  * Browser-based Notion Automation
  * Saves the analysis result to Notion by simulating UI interactions.
  */
+import NotionService from './notion_service.js';
+
 export async function saveToNotion(prompt, optimalAnswer, results) {
-    let browser;
-    try {
-        browser = await puppeteer.launch({
-            headless: false,
-            userDataDir: USER_DATA_DIR,
-            executablePath: "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
-            defaultViewport: null,
-            args: ['--start-maximized']
-        });
-
-        const page = await browser.newPage();
-        const notionUrl = process.env.NOTION_URL || "https://www.notion.so/";
-
-        await page.goto(notionUrl, { waitUntil: 'networkidle2' });
-
-        // Wait for Notion to load (checking for sidebar or specific element)
-        await page.waitForSelector('.notion-sidebar-container', { timeout: 30000 }).catch(() => {
-            console.log("Notion Sidebar not found. Maybe not logged in?");
-        });
-
-        // 1. Create New Page (Usually a '+' button or 'New' button)
-        // This is tricky as Notion's UI changes. A common way is to use the Quick Search or New Page shortcut 'Ctrl+N'
-        await page.keyboard.down('Control');
-        await page.keyboard.press('n');
-        await page.keyboard.up('Control');
-        await delay(2000);
-
-        // 2. Type Title
-        const titleContent = `[AI분석] ${prompt.substring(0, 40)}...`;
-        await page.keyboard.type(titleContent);
-        await page.keyboard.press('Enter');
-        await delay(1000);
-
-        // 3. Construct Markdown Content
-        let markdown = `# AI Search Analysis Report\n\n`;
-        markdown += `## Original Prompt\n> ${prompt}\n\n`;
-        markdown += `--- \n\n`;
-        markdown += `## 🤖 AI Agency Synthesis Result\n\n${optimalAnswer}\n\n`;
-        markdown += `--- \n\n`;
-        markdown += `## 📊 Individual AI Responses\n\n`;
-
-        for (const [ai, text] of Object.entries(results)) {
-            markdown += `### ${ai.toUpperCase()}\n${text}\n\n`;
-        }
-
-        // 4. Paste Content
-        // Notion supports markdown pasting. We'll use the clipboard if possible, 
-        // but for robustness in Puppeteer, we can use the page.evaluate with clipboard API or just type.
-        // Typing is slow. Let's try to set clipboard and paste.
-
-        await page.evaluate((text) => {
-            const el = document.createElement('textarea');
-            el.value = text;
-            document.body.appendChild(el);
-            el.select();
-            document.execCommand('copy');
-            document.body.removeChild(el);
-        }, markdown);
-
-        await page.keyboard.down('Control');
-        await page.keyboard.press('v');
-        await page.keyboard.up('Control');
-
-        await delay(3000); // Wait for sync
-
-        const finalUrl = page.url();
-        return { success: true, url: finalUrl };
-
-    } catch (error) {
-        console.error("Notion Automation Error:", error);
-        throw error;
-    } finally {
-        if (browser) await browser.close();
-    }
+    const resp = await NotionService.saveAnalysis(prompt, optimalAnswer, results);
+    return { success: true, url: `https://www.notion.so/${resp.id.replace(/-/g, '')}` };
 }
