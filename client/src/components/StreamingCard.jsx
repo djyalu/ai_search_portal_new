@@ -17,15 +17,15 @@ const StreamingCard = ({ title, icon: Icon, text, color }) => {
                     <Icon className="w-5 h-5" />
                 </div>
                 <div className="flex-1">
-                    <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-[#8c8279]">{title}</h4>
+                    <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-base-800/60">{title}</h4>
                     <div className="flex items-center gap-2">
-                        <span className="text-[9px] font-bold text-[#b0a79f]">Processing Live Stream</span>
+                        <span className="text-[9px] font-bold text-base-800/40 uppercase tracking-widest">Processing Live Stream</span>
                         {text && <div className="w-1 h-1 bg-teal-accent rounded-full animate-ping" />}
                     </div>
                 </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto text-[13px] font-medium leading-[1.8] text-base-800/80 custom-scrollbar scrollbar-hide whitespace-pre-wrap italic selection:bg-teal-accent/20">
+            <div className="flex-1 overflow-y-auto text-[13px] font-medium leading-[1.8] text-base-900 custom-scrollbar scrollbar-hide whitespace-pre-wrap italic selection:bg-teal-accent/20">
                 {text || (
                     <div className="flex flex-col gap-3 opacity-20">
                         <div className="h-3 bg-base-100 rounded-full w-3/4 animate-pulse" />

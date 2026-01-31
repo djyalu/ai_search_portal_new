@@ -1,16 +1,17 @@
-@import "tailwindcss";
-
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@300;400;500;600;700&family=Space+Grotesk:wght@300;400;500;600;700&display=swap');
+@import "tailwindcss";
 
 @theme {
   --font-sans: "IBM Plex Sans KR", ui-sans-serif, system-ui, sans-serif;
   --font-display: "Space Grotesk", sans-serif;
-  
+
   --color-base-900: #1a1a1a;
   --color-base-800: #2d2a28;
+  --color-base-300: #d8d1c8;
+  --color-base-200: #e6e0d8;
   --color-base-100: #f5f2ed;
-  --color-base-50:  #fffdf9;
-  
+  --color-base-50: #fffdf9;
+
   --color-teal-accent: #00f5d4;
   --color-amber-accent: #ffbe0b;
   --color-coral-accent: #ff006e;
@@ -24,13 +25,59 @@
     @apply bg-base-50 text-base-900 font-sans antialiased;
     background-image: radial-gradient(circle at 50% 50%, rgba(245, 242, 237, 0.5) 0%, rgba(255, 253, 249, 1) 100%);
   }
+
+  /* Typography Scale Overrides */
+  .prose h2 {
+    @apply font-display text-[28px] font-extrabold mb-6 mt-12 italic tracking-tighter text-base-900;
+  }
+
+  .prose h3 {
+    @apply font-display text-[22px] font-black mb-4 mt-8 tracking-tight text-base-900;
+  }
+
+  .prose h4 {
+    @apply font-display text-[18px] font-bold mb-3 mt-6 text-base-900;
+  }
+
+  .prose p {
+    @apply text-[16px] leading-[1.8] mb-6 text-base-900;
+  }
+
+  .prose strong {
+    @apply text-base-900 font-bold decoration-teal-accent/30 decoration-4 underline-offset-4;
+  }
+
+  .prose blockquote {
+    @apply border-l-4 border-teal-accent bg-base-100/50 p-6 rounded-r-2xl italic mb-8;
+  }
+
+  .prose table {
+    @apply w-full border-collapse mb-8 overflow-hidden rounded-xl border border-base-100;
+  }
+
+  .prose th {
+    @apply bg-base-100 p-4 text-left font-black text-[10px] uppercase tracking-widest border border-base-100 text-base-800;
+  }
+
+  .prose td {
+    @apply p-4 border border-base-100 text-[14px] leading-relaxed text-base-900;
+  }
+
+  .prose ul,
+  .prose ol {
+    @apply mb-6 ml-6 space-y-2;
+  }
+
+  .prose li {
+    @apply text-[16px] leading-[1.8] text-base-900;
+  }
 }
 
 @layer components {
   .sidebar-nav-item {
     @apply flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 hover:bg-base-100 font-medium text-sm;
   }
-  
+
   .sidebar-nav-item.active {
     @apply bg-base-900 text-white shadow-premium;
   }
@@ -53,9 +100,11 @@
   width: 6px;
   height: 6px;
 }
+
 ::-webkit-scrollbar-track {
   @apply bg-transparent;
 }
+
 ::-webkit-scrollbar-thumb {
   @apply bg-base-100 rounded-full hover:bg-base-300 transition-colors;
 }

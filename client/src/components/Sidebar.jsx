@@ -44,16 +44,16 @@ const Sidebar = ({ activeTab, onTabChange }) => {
 
             <div className="mt-auto space-y-4">
                 <div className="p-4 bg-teal-accent/5 rounded-2xl border border-teal-accent/10">
-                    <p className="text-[10px] font-black uppercase tracking-widest text-[#6b635c] mb-2">Agency Status</p>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-base-800/60 mb-2">Agency Status</p>
                     <div className="flex items-center gap-2">
                         <span className="w-2 h-2 rounded-full bg-teal-accent animate-pulse" />
                         <span className="text-xs font-bold text-base-900">4 Active Nodes</span>
                     </div>
                 </div>
 
-                <div className="flex items-center justify-between px-2 opacity-50 text-[10px] font-bold">
+                <div className="flex items-center justify-between px-2 text-[10px] font-bold text-base-800/60">
                     <span>v2.2.0</span>
-                    <button className="hover:text-base-900 flex items-center gap-1">
+                    <button className="hover:text-base-900 flex items-center gap-1 transition-colors">
                         <Share2 className="w-3 h-3" />
                         Share
                     </button>

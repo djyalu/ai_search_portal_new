@@ -43,7 +43,7 @@ const AnalysisWorkspace = ({
         }
 
         return (
-            <div className="prose prose-slate max-w-none prose-headings:font-display prose-headings:italic prose-headings:font-black prose-p:leading-[1.8] prose-p:font-medium text-base-800/90"
+            <div className="prose prose-slate max-w-none"
                 dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }} />
         );
     };
@@ -55,13 +55,13 @@ const AnalysisWorkspace = ({
                 <div className="max-w-4xl mx-auto space-y-6">
                     <div className="relative group">
                         <div className={`absolute -inset-1 bg-gradient-to-r from-base-900 to-teal-accent rounded-[2.5rem] blur-xl opacity-0 group-hover:opacity-10 transition duration-1000 ${isAnalyzing ? 'opacity-5' : ''}`}></div>
-                        <div className="relative bg-white border-2 border-base-100 rounded-[2.2rem] p-3 flex items-center shadow-premium focus-within:border-teal-accent/40 transition-all overflow-hidden">
+                        <div className="relative bg-white border-2 border-base-100 rounded-[2.2rem] p-3 flex items-center shadow-premium focus-within:border-teal-accent/50 transition-all overflow-hidden">
                             <input
                                 type="text"
                                 value={prompt}
                                 onChange={(e) => setPrompt(e.target.value)}
                                 placeholder="어떤 주제를 정밀 분석할까요?"
-                                className={`flex-1 bg-transparent border-none outline-none px-8 py-5 font-display font-bold text-2xl placeholder-base-800/30 ${isAnalyzing ? 'opacity-60 cursor-not-allowed' : ''}`}
+                                className={`flex-1 bg-transparent border-none outline-none px-8 py-5 font-display font-bold text-2xl text-base-900 placeholder-base-800/40 ${isAnalyzing ? 'opacity-70 cursor-not-allowed' : ''}`}
                                 onKeyDown={(e) => e.key === 'Enter' && handleAnalyze()}
                                 readOnly={isAnalyzing}
                             />
@@ -89,8 +89,11 @@ const AnalysisWorkspace = ({
                                         : 'bg-white text-base-800 border-base-100 hover:border-base-200'
                                         }`}
                                 >
-                                    <div className={`w-1.5 h-1.5 rounded-full ${enabled ? 'bg-teal-accent animate-pulse' : 'bg-base-100'}`} />
+                                    <div className={`w-1.5 h-1.5 rounded-full ${enabled ? 'bg-teal-accent animate-pulse' : 'bg-base-200'}`} />
                                     {agent.label}
+                                    <span className={`ml-1 text-[10px] tracking-widest ${enabled ? 'text-white/80' : 'text-base-800/40'}`}>
+                                        {enabled ? 'ON' : 'OFF'}
+                                    </span>
                                 </button>
                             );
                         })}
@@ -127,7 +130,7 @@ const AnalysisWorkspace = ({
                                             <button
                                                 key={t.id}
                                                 onClick={() => setActiveTab(t.id)}
-                                                className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === t.id ? 'bg-white text-base-900 shadow-sm border border-base-100' : 'text-base-800/40 hover:text-base-800'}`}
+                                                className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === t.id ? 'bg-base-900 text-white shadow-premium' : 'text-base-800/60 hover:text-base-900'}`}
                                             >
                                                 <t.icon className="w-3.5 h-3.5" />
                                                 {t.label}
@@ -140,7 +143,7 @@ const AnalysisWorkspace = ({
                                             <button
                                                 key={ext}
                                                 onClick={() => handleExport(ext, activeTab)}
-                                                className="p-3 bg-white border border-base-100 rounded-xl hover:border-teal-accent/30 transition-all text-base-800/60 hover:text-base-900 shadow-sm"
+                                                className="p-3 bg-white border border-base-100 rounded-xl hover:border-teal-accent/30 transition-all text-base-800 shadow-sm"
                                             >
                                                 {isExporting[ext] ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileDown className="w-4 h-4" />}
                                             </button>
@@ -148,30 +151,49 @@ const AnalysisWorkspace = ({
                                     </div>
                                 </div>
 
-                                <div className="premium-card bg-white p-12 lg:p-16 relative">
-                                    <div className="mb-12">
-                                        <div className="flex items-center gap-2 text-[9px] font-black uppercase tracking-widest text-base-800/30 mb-2">
-                                            <FileText className="w-3 h-3" />
+                                <div className="premium-card bg-white p-12 lg:p-20 relative">
+                                    <header className="mb-16">
+                                        <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.3em] text-base-800/40 mb-4">
+                                            <FileText className="w-3 h-3 text-teal-accent" />
                                             Intelligence Report / {activeTab}
                                         </div>
-                                        <h2 className="text-4xl font-black text-base-900 font-display italic tracking-tighter capitalize underline decoration-teal-accent/30 decoration-8 underline-offset-8">
+                                        <h2 className="text-5xl font-black text-base-900 font-display italic tracking-tight capitalize mb-12">
                                             {activeTab === 'optimal' ? 'Unified Analysis' : activeTab === 'individual' ? 'Raw Evidence' : 'Logic Audit'}
                                         </h2>
-                                        <div className="flex items-center gap-4 mt-8 opacity-40 text-[10px] font-bold">
-                                            <span>Time: {reportTimestamp}</span>
-                                            <span>•</span>
-                                            <span>Sources: {enabledAgentNames}</span>
-                                        </div>
-                                    </div>
 
-                                    {renderContent()}
+                                        <div className="p-8 bg-base-50/50 rounded-[2.5rem] border border-base-100 flex flex-wrap items-center gap-y-6 gap-x-12">
+                                            <div className="flex flex-col gap-1.5">
+                                                <span className="text-[9px] font-black uppercase tracking-[0.2em] text-base-800/40">Timestamp</span>
+                                                <span className="text-xs font-bold text-base-900">{reportTimestamp}</span>
+                                            </div>
+                                            <div className="flex flex-col gap-1.5">
+                                                <span className="text-[9px] font-black uppercase tracking-[0.2em] text-base-800/40">Sources</span>
+                                                <span className="text-xs font-bold text-base-900">{enabledAgentNames}</span>
+                                            </div>
+                                            <div className="flex flex-col gap-1.5">
+                                                <span className="text-[9px] font-black uppercase tracking-[0.2em] text-base-800/40">Status</span>
+                                                <div className="flex items-center gap-2">
+                                                    <div className="w-1.5 h-1.5 rounded-full bg-teal-accent" />
+                                                    <span className="text-xs font-bold text-base-900 uppercase">Verified</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </header>
+
+                                    <article className="max-w-4xl">
+                                        {renderContent()}
+                                    </article>
                                 </div>
                             </motion.div>
                         ) : (
-                            <div className="h-full flex flex-col items-center justify-center text-center space-y-6 opacity-20 grayscale">
-                                <BrainCircuit className="w-24 h-24 mb-4" />
-                                <h2 className="text-2xl font-black uppercase tracking-tighter">System Idle / Ready for Input</h2>
-                                <p className="text-xs font-bold tracking-widest max-w-xs leading-loose">START A NEW SESSION BY TYPING YOUR QUERY IN THE SEARCH BAR ABOVE</p>
+                            <div className="h-full flex flex-col items-center justify-center text-center space-y-8 py-24">
+                                <div className="p-8 bg-base-100 rounded-full text-base-800/10">
+                                    <BrainCircuit className="w-24 h-24" />
+                                </div>
+                                <div className="space-y-4">
+                                    <h2 className="text-3xl font-black uppercase tracking-tighter text-base-900 italic font-display">System Idle / Ready</h2>
+                                    <p className="text-xs font-bold tracking-widest max-w-xs mx-auto leading-loose text-base-800/40 uppercase">Enter a query to initiate multi-agent research and synthesis pipeline</p>
+                                </div>
                             </div>
                         )}
                     </div>
@@ -215,7 +237,7 @@ const AnalysisWorkspace = ({
                                             transition={{ duration: 40, ease: "linear" }}
                                         />
                                     </div>
-                                    <p className="text-[9px] font-black uppercase tracking-widest text-white/40 mt-4 text-center animate-pulse">Orchestrating Multi-Agent Pipeline...</p>
+                                    <p className="text-[9px] font-black uppercase tracking-widest text-white/40 mt-4 text-center animate-pulse">Orchestrating Pipeline...</p>
                                 </div>
                             )}
                         </div>
