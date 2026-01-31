@@ -170,3 +170,17 @@
 - **Date**: 2026-01-31
 - **Action**: Enhanced Final Synthesis prompt to produce McKinsey-style strategic reports. Introduced support for executive summaries, core KPI highlighting, and structured scenario analysis.
 - **Status**: Completed
+### Phase 31: RALPH Structural Optimization (ChatGPT/Claude)
+- **Date**: 2026-01-31
+- **Action**: Performed RALPH loop-based structural analysis in `docs/AGENT-STRUCTURAL-FIX.md`. Implemented robust input synchronization (Focus -> Clear -> Hybrid Typing), enhanced send fallback (Control+Enter), and added `isChatGPTSignedOut` diagnostic.
+- **Status**: Completed
+
+### Phase 32: Agent Interaction v3.5 (Robustness)
+- **Date**: 2026-02-01
+- **Action**: 
+  - **Triple Send Strategy**: Implemented "Paste + Ctrl+Enter -> Enter -> Click" fallback chain for Claude/Gemini to bypass React state issues.
+  - **Smart Send Verification**: Added checks to prevent "Stop" button accidents during send sequence.
+  - **MutationObserver Engine**: Replaced Selector-based extraction with Observer-based dynamic text capture for reliable scraping.
+  - **Gemini Sign-in Fix**: Fixed `isGeminiSignedOut` to detect "Sign in Gemini" signatures and implemented "Fail Fast" logic for session expiry.
+  - **Error Status Refinement**: Prevented false positives in `agentStatus` (e.g. valid text containing "error" word).
+- **Status**: Completed
