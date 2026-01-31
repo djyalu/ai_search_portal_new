@@ -14,7 +14,7 @@ const History = ({ history, onSelect, onDelete }) => {
             <div className="max-w-5xl mx-auto space-y-12">
                 <header className="flex flex-col md:flex-row md:items-end justify-between gap-8">
                     <div>
-                        <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-[#8c8279] mb-3">
+                        <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-base-800/60 mb-3">
                             <Clock className="w-3.5 h-3.5 text-teal-accent" />
                             Intelligence Archive
                         </div>
@@ -28,7 +28,7 @@ const History = ({ history, onSelect, onDelete }) => {
                             placeholder="Search reports..."
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
-                            className="w-full bg-white border-2 border-base-100 rounded-2xl py-4 pl-14 pr-6 font-bold text-sm outline-none focus:border-teal-accent/30 transition-all shadow-sm"
+                            className="w-full bg-white border-2 border-base-100 rounded-2xl py-4 pl-14 pr-6 font-bold text-sm text-base-900 outline-none focus:border-teal-accent/30 transition-all shadow-sm placeholder-base-800/40"
                         />
                     </div>
                 </header>
@@ -62,7 +62,7 @@ const History = ({ history, onSelect, onDelete }) => {
                                 </p>
 
                                 <div className="flex items-center justify-between pt-6 border-t border-base-100 mt-auto">
-                                    <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-base-800/30">
+                                    <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-base-800/60">
                                         <Calendar className="w-3 h-3" />
                                         {new Date(item.created_at).toLocaleDateString()}
                                     </div>
@@ -70,9 +70,9 @@ const History = ({ history, onSelect, onDelete }) => {
                                 </div>
                             </motion.div>
                         )) : (
-                            <div className="col-span-full py-24 flex flex-col items-center justify-center opacity-20 grayscale grayscale-100 grayscale-fade">
-                                <Box className="w-16 h-16 mb-6" />
-                                <p className="font-display font-black text-xl uppercase tracking-widest italic">No Records Found</p>
+                            <div className="col-span-full py-24 flex flex-col items-center justify-center opacity-60">
+                                <Box className="w-16 h-16 mb-6 text-base-800/20" />
+                                <p className="font-display font-black text-xl uppercase tracking-widest italic text-base-800/40">No Records Found</p>
                             </div>
                         )}
                     </AnimatePresence>
