@@ -18,6 +18,13 @@ const USER_DATA_DIR = path.join(__dirname, `${USER_DATA_BASE}_${BROWSER_CHANNEL}
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+const LOG_PATH = path.join(process.cwd(), 'server.log');
+function logInternal(...args) {
+    const line = args.map(a => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
+    fs.appendFile(LOG_PATH, `${new Date().toISOString()} [HANDLER] ` + line + '\n', (err) => { if (err) {/* ignore */ } });
+    console.log('[HANDLER]', ...args);
+}
+
 /**
  * Robust Text Extraction with Polling
  */
@@ -53,17 +60,17 @@ function sanitizeClaudeOutput(text) {
     const stopLabels = new Set([
         'new chat', 'search', 'chats', 'projects', 'artifacts', 'code', 'recents', 'hide',
         'all chats', 'history', 'recent', 'share', 'free plan', 'upgrade', 'account', 'settings',
-        'subscribe', 'user', 'claude', 'claude.ai', 'anthropic', 'help', 'star', 'pinned'
+        'subscribe', 'user', 'claude', 'claude.ai', 'anthropic', 'help', 'star', 'pinned',
+        'retry', 'copy', 'helpful', 'unhelpful'
     ]);
     const filtered = lines.filter((line) => {
         const l = line.trim();
         if (!l) return true;
+        if (l.length > 50) return true; // unlikely to be a UI label
         const lower = l.toLowerCase();
         if (stopLabels.has(lower)) return false;
         if (lower.includes('search results')) return false;
         if (lower === 'sources' || lower.startsWith('sources ') || lower.startsWith('source ')) return false;
-        if (lower.startsWith('http://') || lower.startsWith('https://')) return false;
-        if (/(^|\s)([a-z0-9-]+\.)+(com|net|org|ai|io|co|kr|us|uk|edu|gov|jp|cn|de)(\b|\/)/i.test(l)) return false;
         return true;
     });
     const cleaned = filtered.join('\n').replace(/\n{3,}/g, '\n\n').trim();
@@ -184,7 +191,8 @@ async function getGeminiResponseText(page) {
             }
             return null;
         });
-    } catch (_) {
+    } catch (err) {
+        logInternal('getGeminiResponseText error:', err.message);
         return null;
     }
 }
@@ -210,6 +218,21 @@ async function isGeminiSignedOut(page) {
             const signInBtn = document.querySelector('a[href*="/signin"], a[href*="/login"], [aria-label*="Sign in"], button.sign-in');
             const bodyText = document.body ? document.body.innerText || '' : '';
             return !!(signInBtn || bodyText.includes('Sign in') || bodyText.includes('로그인하세요'));
+        });
+    } catch (_) {
+        return false;
+    }
+}
+
+async function isClaudeSignedOut(page) {
+    try {
+        return await page.evaluate(() => {
+            const bodyText = document.body ? document.body.innerText || '' : '';
+            return !!(
+                document.querySelector('a[href*="/login"], a[href*="/register"]') ||
+                bodyText.includes('Sign in to Claude') ||
+                bodyText.includes('Welcome back') && bodyText.includes('Email')
+            );
         });
     } catch (_) {
         return false;
@@ -261,6 +284,7 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
         let browserContext;
         let browser = null;
         try {
+            logInternal(`RALPH 에이전시 파이프라인 가동... Prompt: ${prompt.substring(0, 30)}`);
             onProgress({ status: 'hierarchy_init', message: '[Hierarchy] RALPH 에이전시 파이프라인 가동...' });
 
             const launchOptions = {
@@ -284,6 +308,7 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
             }
 
             // --- 1. Reasoning Phase (R) ---
+            logInternal(`Reasoning Phase 시작. Prompt sent to Perplexity...`);
             onProgress({ status: 'reasoning', message: '[Reasoning] 질의 의도 분석 및 에이전트 작업 설계 중...' });
             const planningPrompt = `질문: "${prompt}"\n이 질문을 가장 효과적으로 분석하기 위해 4개의 AI(Search, Reasoning, Creative, Logical)에게 각각 어떤 관점으로 질문하면 좋을지 전략을 간단히 요약해줘. 한국어로 작성해.`;
 
@@ -321,6 +346,7 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
                     }
                     await delay(5000);
                     strategy = await getCleanText(planningPage, ['.prose', '.result', '.message-content']) || "기본 전략 가동";
+                    logInternal(`Reasoning 완료. Strategy: ${strategy.substring(0, 50)}...`);
                 } catch (err) {
                     // keep going but log planning error
                     strategy = `에러 발생: ${err.message}`;
@@ -335,9 +361,9 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
 
             const workers = [
                 { id: 'perplexity', name: 'Perplexity', url: 'https://www.perplexity.ai/', input: ['textarea[placeholder*="Ask"]', '#ask-input', '[data-lexical-editor="true"]', 'div[contenteditable="true"]', 'textarea'], result: ['[data-testid="answer"]', '.prose', '.result', '.pplx-stream'] },
-                { id: 'chatgpt', name: 'ChatGPT', url: 'https://chatgpt.com/', input: ['#prompt-textarea', 'textarea[placeholder*="ChatGPT"]', 'textarea'], result: ['.markdown', 'article'] },
+                { id: 'chatgpt', name: 'ChatGPT', url: 'https://chatgpt.com/', input: ['#prompt-textarea', 'textarea[placeholder*="ChatGPT"]', 'textarea'], result: ['[data-testid*="conversation-result"] .markdown', '.markdown', 'article .markdown', 'article'] },
                 { id: 'gemini', name: 'Gemini', url: 'https://gemini.google.com/app', input: ['rich-textarea .ql-editor[contenteditable="true"]', 'div.input-area ql-editor', '[data-node-type="input-area"] .ql-editor[contenteditable="true"]', 'div.ql-editor[contenteditable="true"]', 'div[contenteditable="true"]', 'textarea'], result: ['[data-testid="response-content"]', '[data-testid="assistant-response"]', 'model-response', '.message-content', '.assistant-response', 'article'] },
-                { id: 'claude', name: 'Claude', url: 'https://claude.ai/new', input: ['div[contenteditable="true"][aria-label*="Claude"]', '[data-testid="chat-input"]', '[data-testid="message-input"]', 'div[contenteditable="true"][data-testid]', 'div[contenteditable="true"]', 'textarea[aria-label]', 'textarea', '#prompt-textarea', 'textarea[placeholder]', '[role="textbox"]'], result: ['[data-testid="assistant-message"]', '[data-testid="chat-message"]', '[data-testid="message-text"]', '.message-content', '.assistant-response', '.font-claude-message', 'article'] }
+                { id: 'claude', name: 'Claude', url: 'https://claude.ai/new', input: ['div[contenteditable="true"][aria-label*="Claude"]', '[data-testid="chat-input"]', '[data-testid="message-input"]', 'div[contenteditable="true"][data-testid]', 'div[contenteditable="true"]', 'textarea[aria-label]', 'textarea', '#prompt-textarea', 'textarea[placeholder]', '[role="textbox"]'], result: ['[data-testid="assistant-message"] [data-testid="message-text"]', '[data-testid="assistant-message"] .font-claude-message', '[data-testid="assistant-message"] .prose', '[data-testid="assistant-message"]', '.message-content', 'article'] }
             ];
             const workerById = Object.fromEntries(workers.map(w => [w.id, w]));
             const activeWorkers = workers.filter(w => enabledAgents[w.id]);
@@ -356,6 +382,7 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
             const handleWorker = async (worker) => {
                 const page = await browserContext.newPage();
                 try {
+                    logInternal(`Worker ${worker.id} 시작...`);
                     onProgress({ status: 'worker_active', message: `[Agency] ${worker.name} 에이전트 작업 중...` });
                     await page.goto(worker.url, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
@@ -367,6 +394,17 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
                             const stillSignedOut = await isGeminiSignedOut(page);
                             if (stillSignedOut) {
                                 return { id: worker.id, value: 'Gemini is signed out. Please run setup_auth_playwright.js to refresh session.' };
+                            }
+                        }
+                    }
+
+                    if (worker.id === 'claude') {
+                        const signedOut = await isClaudeSignedOut(page);
+                        if (signedOut) {
+                            logInternal('Claude is signed out. Waiting 3s for possible redirect/session recovery...');
+                            await delay(3000);
+                            if (await isClaudeSignedOut(page)) {
+                                return { id: worker.id, value: 'Claude is signed out. Please refresh session.' };
                             }
                         }
                     }
@@ -423,7 +461,10 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
                             const isThinking = await page.evaluate(() => {
                                 const indicators = [
                                     '.streaming', '.typing', '.thinking', '[data-testid="loading-indicator"]',
-                                    'svg.animate-spin', '.dot-flashing', '.progress-bar'
+                                    'svg.animate-spin', '.dot-flashing', '.progress-bar',
+                                    'button[aria-label*="Stop"]', 'button[aria-label*="중단"]', 'button[data-testid*="stop"]',
+                                    'button[aria-label="Cancel"]',
+                                    '.result-streaming', '.anticon-loading'
                                 ];
                                 return indicators.some(sel => !!document.querySelector(sel));
                             }).catch(() => false);
@@ -437,6 +478,9 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
                                 );
 
                             let candidate = current;
+                            if (candidate && candidate.length > 0 && i < 3) {
+                                logInternal(`Worker ${worker.id} candidate length: ${candidate.length}`);
+                            }
                             if (worker.id === 'claude') candidate = sanitizeClaudeOutput(candidate);
                             if (worker.id === 'perplexity') candidate = sanitizePerplexityOutput(candidate);
                             if (worker.id === 'gemini') candidate = sanitizeGeminiOutput(candidate, workerPrompt);
@@ -449,14 +493,11 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
                                 } else if (lastText.length >= minLength && !isThinking) {
                                     // Only increment stableCount if NOT thinking
                                     stableCount += 1;
-                                    onProgress({ status: 'streaming', service: worker.id, content: lastText });
                                 }
                             }
 
-                            // Exit conditions: 
-                            // 1. Stable for 2 iterations + no thinking active
-                            // 2. Final iteration reached
-                            if ((stableCount >= 2 && lastText.length >= minLength && !isThinking) || (i === maxIters - 1)) break;
+                            // 1. Stable for 1 iteration + no thinking active
+                            if ((stableCount >= 1 && lastText.length >= minLength && !isThinking) || (i === maxIters - 1)) break;
                         } catch (loopErr) {
                             console.warn(`Loop iteration error for ${worker.id}: ${loopErr.message}`);
                             // If context was destroyed, we just try again next iteration (it will likely recover on new page state)
@@ -469,9 +510,11 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
                     }
 
                     if (!lastText || lastText.trim().length === 0) {
+                        logInternal(`Worker ${worker.id} 완료: 텍스트 없음.`);
                         return { id: worker.id, value: `에러: 응답 미수신` };
                     }
 
+                    logInternal(`Worker ${worker.id} 완료: ${lastText.length} 자 수집.`);
                     return { id: worker.id, value: lastText };
                 } catch (e) {
                     console.error(`worker ${worker.id} error:`, e.message);

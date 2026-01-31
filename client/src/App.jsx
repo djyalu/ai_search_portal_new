@@ -295,7 +295,7 @@ function App() {
     const a = document.createElement('a');
     a.href = url;
     a.download = filename;
-    a.document.body.appendChild(a);
+    document.body.appendChild(a);
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
@@ -356,34 +356,40 @@ function App() {
   const MarkdownContent = ({ content }) => {
     const rawHtml = marked.parse(content || '');
     const html = sanitizeHtml(rawHtml);
-    return <div className="prose prose-slate max-w-none 
+    return <div className="prose max-w-none 
               prose-headings:text-[#1f2a44] prose-headings:font-black 
-              prose-p:leading-relaxed prose-p:font-medium text-[#1f2a44]"
+              prose-p:leading-normal prose-p:font-medium text-[#1f2a44] pt-8 border-t border-[#e6e0d8]/50"
       dangerouslySetInnerHTML={{ __html: html }} />;
   };
 
   const ReportMeta = ({ title, timestamp, agents, summary }) => (
-    <div className="report-meta-block mb-12 p-10 bg-[#f8f9fa] border border-[#e9ecef] rounded-3xl">
-      <h2 className="text-[28px] font-black text-[#1f2a44] mb-4">{title}</h2>
-      <div className="flex flex-wrap gap-x-6 gap-y-2 text-[13px] text-[#4b433d] font-bold uppercase tracking-wider mb-6 border-b border-[#e9ecef] pb-6">
+    <div className="report-meta-block mb-10 p-8 bg-[#f4eee6]/30 border border-[#e6e0d8] rounded-[2rem]">
+      <h2 className="text-[26px] font-black text-[#1f2a44] mb-4">{title}</h2>
+      <div className="flex flex-wrap gap-x-6 gap-y-2 text-[12px] text-[#8a8178] font-bold uppercase tracking-wider mb-6 border-b border-[#e6e0d8] pb-6">
         <div className="flex items-center gap-2"><Clock className="w-4 h-4 text-[#b48a3c]" /> <span>생성: {timestamp}</span></div>
         <div className="flex items-center gap-2"><Layers className="w-4 h-4 text-[#b48a3c]" /> <span>에이전트: {agents}</span></div>
       </div>
       {summary && (
         <div className="flex gap-4 items-start">
-          <div className="mt-1.5 w-2 h-2 rounded-full bg-[#b48a3c] shrink-0" />
-          <p className="text-[15px] font-bold text-[#1f2a44] leading-relaxed italic">{summary}</p>
+          <div className="mt-1.5 w-2.5 h-2.5 rounded-full bg-[#b48a3c] shrink-0 shadow-[0_0_8px_rgba(180,138,60,0.4)]" />
+          <p className="text-[14px] font-bold text-[#1f2a44] leading-normal italic">{summary}</p>
         </div>
       )}
     </div>
   );
 
-  const RALPHIndicator = ({ phase, label, active, completed }) => (
-    <div className={`flex flex-col items-center gap-2 transition-all duration-500 ${active ? 'scale-110 opacity-100' : 'opacity-60'}`}>
-      <div className={`w-12 h-12 rounded-2xl flex items-center justify-center border-2 ${completed ? 'bg-[#b48a3c] border-[#b48a3c] text-white' : active ? 'bg-[#1f2a44] border-[#1f2a44] text-white animate-pulse' : 'bg-transparent border-[#d8d1c8]'}`}>
-        <span className="font-black italic">{phase}</span>
+  const ProcessIndicator = ({ phase, label, active, completed }) => (
+    <div className={`flex flex-col items-center gap-3 transition-all duration-700 ${active || completed ? 'opacity-100 scale-100' : 'opacity-30 scale-90'}`}>
+      <div
+        style={{ borderRadius: '255px 15px 225px 15px/15px 225px 15px 255px' }}
+        className={`w-12 h-12 flex items-center justify-center border-2 text-lg font-black italic transition-all duration-500 shadow-xl ${completed ? 'bg-white text-[#1a1a1a] border-white' :
+          active ? 'bg-transparent border-white text-white animate-pulse' :
+            'bg-transparent border-white/20 text-white/40'
+          }`}
+      >
+        {phase}
       </div>
-      <span className="text-[9px] font-black uppercase tracking-widest text-[#1f2a44]">{label}</span>
+      <span className={`text-[9px] font-black uppercase tracking-widest ${active || completed ? 'text-white' : 'text-white/30'}`}>{label}</span>
     </div>
   );
 
@@ -416,323 +422,298 @@ function App() {
           </div>
         )}
       </div>
-      <div className={`flex-1 overflow-y-auto text-[11px] font-medium leading-relaxed custom-scrollbar scrollbar-hide whitespace-pre-wrap italic ${status === 'error' ? 'text-red-600' : 'text-[#1f2a44]'
+      <div className={`flex-1 overflow-y-auto text-[11px] font-medium leading-[1.5] custom-scrollbar scrollbar-hide whitespace-pre-wrap italic ${status === 'error' ? 'text-red-600' : 'text-[#1f2a44]'
         }`}>
         {text || (status === 'active' ? "데이터 스트리밍 중..." : "분석 대기 중...")}
       </div>
     </div>
   );
 
-  const ExportButton = ({ type, label }) => (
+  const ExportButton = ({ type, label, icon: Icon }) => (
     <button
       onClick={() => handleExport(type)}
       disabled={isExporting[type] || !results}
-      className={`px-6 py-4 rounded-3xl font-black text-[10px] uppercase tracking-[0.2em] shadow-xl flex items-center gap-3 transition-all ${isExporting[type] ? 'bg-[#b48a3c] text-white' : 'bg-[#f4eee6] text-[#1f2a44] hover:scale-105'
+      className={`px-4 py-3 rounded-2xl font-black text-[9px] uppercase tracking-widest shadow-lg flex items-center gap-2.5 transition-all ${isExporting[type] ? 'bg-[#b48a3c] text-white' : 'bg-[#f4eee6] text-[#1f2a44] hover:bg-[#ebe2d8] hover:translate-y-[-1px]'
         } ${!results ? 'opacity-50 cursor-not-allowed' : ''}`}
     >
-      {isExporting[type] ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileDown className="w-4 h-4" />}
-      {label}
+      {isExporting[type] ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Icon className="w-3.5 h-3.5" />}
+      <span>{label}</span>
     </button>
   );
 
   return (
-    <div className="portal-shell">
+    <div className="portal-shell selection:bg-[#b48a3c]/30 selection:text-white">
       <div className="portal-frame">
-        <div className="min-h-screen bg-[#f5f2ed] text-[#1f2a44] font-sans selection:bg-[#b48a3c]/30">
-          <div className="max-w-7xl mx-auto p-6 md:p-12 space-y-12">
-
-            {/* Superior Header */}
-            <div className="portal-header-wrap">
-              <header className="flex flex-col xl:flex-row items-center justify-between gap-12">
-                <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="flex items-center gap-8">
-                  <div className="relative">
-                    <div className="absolute inset-0 bg-[#b48a3c] blur-2xl opacity-10 animate-pulse"></div>
-                    <div className="relative bg-gradient-to-br from-[#1f2a44] to-[#2f3b59] p-5 rounded-[2.5rem] shadow-2xl logo-replacer" style={{ backgroundSize: 'cover', backgroundPosition: 'center', backgroundRepeat: 'no-repeat', backgroundImage: "url('/favicon.png')" }}><Layers className="w-10 h-10 text-white" /></div>
-                  </div>
-                  <div>
-                    <h1 className="text-4xl font-black tracking-tighter uppercase italic text-[#1f2a44]">Multi Agent Analysis</h1>
-                    <div className="flex items-center gap-3 mt-1">
-                      <span className="px-3 py-1 bg-[#b48a3c]/10 text-[#b48a3c] text-[9px] font-black uppercase tracking-widest rounded-lg">프리미엄 합성 스튜디오</span>
-                    </div>
-                  </div>
-                </motion.div>
-
-                {/* Search Box */}
-                <div className="flex-1 max-w-3xl w-full flex flex-col gap-3">
-                  <div className="flex items-center gap-6">
-                    <div className="flex-1 relative group">
-                      <div className="absolute -inset-1 bg-gradient-to-r from-[#1f2a44] to-[#b48a3c] rounded-[2.2rem] blur-xl opacity-0 group-hover:opacity-10 transition duration-1000"></div>
-                      <div className="relative bg-[#fffdf9] border-2 border-[#e6e0d8] rounded-[2rem] p-3 flex items-center shadow-2xl transition-all focus-within:border-[#b48a3c]/60">
-                        <div className="flex items-center gap-3 flex-1">
-                          <input type="text" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="분석할 주제를 입력하세요" className={`flex-1 bg-transparent border-none outline-none px-6 py-3 font-bold text-lg placeholder-[#1f2a44]/60 text-[#1f2a44] ${isAnalyzing ? 'opacity-60 cursor-not-allowed' : ''}`} onKeyDown={(e) => e.key === 'Enter' && handleAnalyze()} readOnly={isAnalyzing} aria-readonly={isAnalyzing} />
-                          {isAnalyzing && (
-                            <div className="flex items-center gap-2 text-[#1f2a44]/60 ml-2 pointer-events-none">
-                              <Lock className="w-4 h-4" />
-                              <span className="text-xs font-bold">입력 잠김</span>
-                            </div>
-                          )}
-                        </div>
-                        <button onClick={handleAnalyze} disabled={isAnalyzing} className="bg-[#1f2a44] hover:bg-[#243150] text-white px-10 py-4 rounded-[1.5rem] font-black text-xs uppercase tracking-widest shadow-xl shadow-[#1f2a44]/20 active:scale-95 disabled:grayscale">
-                          {isAnalyzing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {agentOptions.map(agent => {
-                      const enabled = enabledAgents[agent.id];
-                      return (
-                        <button
-                          key={agent.id}
-                          onClick={() => toggleAgent(agent.id)}
-                          disabled={isAnalyzing}
-                          className={`px-3 py-1 rounded-full text-xs font-black border transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 ${enabled ? agent.on : agent.off
-                            }`}
-                        >
-                          <span className={`w-2 h-2 rounded-full ${enabled ? 'bg-white/90' : agent.dot}`} />
-                          <span>{agent.label}</span>
-                          <span className="ml-1 text-[10px] uppercase tracking-widest">{enabled ? 'ON' : 'OFF'}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
+        {/* Superior Black Header */}
+        <div className="black-header-card">
+          <header className="flex flex-col xl:flex-row items-center justify-between gap-8">
+            <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} className="flex items-center gap-10">
+              <div className="relative">
+                <div className="absolute inset-0 bg-white/5 blur-[80px] rounded-full"></div>
+                <div className="relative group transition-transform duration-700 hover:scale-110">
+                  <img
+                    src="/logo.png"
+                    className="w-20 h-20 object-contain mix-blend-lighten opacity-90 group-hover:opacity-100 transition-all"
+                    alt="Logo"
+                  />
                 </div>
-                {/* Filter logs and toast */}
-                <div className="fixed sm:absolute top-2 sm:top-6 right-2 sm:right-6 flex flex-col items-end gap-2 pointer-events-none z-50">
-                  {filterLogs.map(f => (
-                    <div key={f.id} className="bg-[#fff2d9] text-[#8a5b10] px-3 py-1 rounded-full text-xs font-bold shadow pointer-events-auto">{f.text}</div>
-                  ))}
-                  {toast.visible && (
-                    <div className="bg-[#1f2a44] text-white px-4 py-2 rounded-xl shadow-md text-sm font-semibold pointer-events-auto">{toast.message}</div>
-                  )}
-                  {import.meta.env.DEV && (
-                    <button onClick={() => addFilterLog('Ignored streaming: debug_test', 4000)} className="ml-2 bg-[#b48a3c] text-white px-2 py-1 rounded text-xs font-bold pointer-events-auto dbg-hidden">DBG</button>
+              </div>
+              <div className="flex flex-col">
+                <h1 className="text-3xl font-black tracking-tighter uppercase italic text-white leading-none">Multi Agent Analysis</h1>
+                <div className="flex items-center gap-3 mt-3">
+                  <div className="h-[2px] w-6 bg-white/20" />
+                  <span className="text-[11px] font-black uppercase tracking-[0.3em] text-white/40">Premium Intelligence Studio</span>
+                </div>
+              </div>
+            </motion.div>
+
+            {/* Search Box */}
+            <div className="flex-1 max-w-xl w-full flex flex-col gap-3">
+              <div className="search-input-container">
+                <div className="flex items-center gap-3 flex-1 px-3">
+                  <input
+                    type="text"
+                    value={prompt}
+                    onChange={(e) => setPrompt(e.target.value)}
+                    placeholder="Ask anything..."
+                    className={`flex-1 bg-transparent border-none outline-none py-3 font-bold text-base placeholder-white/20 text-white ${isAnalyzing ? 'opacity-60 cursor-not-allowed' : ''}`}
+                    onKeyDown={(e) => e.key === 'Enter' && handleAnalyze()}
+                    readOnly={isAnalyzing}
+                  />
+                  {isAnalyzing && (
+                    <div className="flex items-center gap-2 text-white/30 pointer-events-none pr-3">
+                      <Lock className="w-3.5 h-3.5" />
+                      <span className="text-[8px] font-black uppercase tracking-widest">Locked</span>
+                    </div>
                   )}
                 </div>
-              </header>
+                <button
+                  onClick={handleAnalyze}
+                  disabled={isAnalyzing}
+                  style={{ borderRadius: '255px 15px 225px 15px/15px 225px 15px 255px' }}
+                  className="bg-white text-[#1a1a1a] px-8 py-3.5 border-2 border-white font-black text-[10px] uppercase tracking-widest shadow-xl active:scale-95 disabled:grayscale"
+                >
+                  {isAnalyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                </button>
+              </div>
+
+              <div className="flex flex-wrap gap-1.5 px-2">
+                {agentOptions.map(agent => {
+                  const enabled = enabledAgents[agent.id];
+                  return (
+                    <button
+                      key={agent.id}
+                      onClick={() => toggleAgent(agent.id)}
+                      disabled={isAnalyzing}
+                      style={{ borderRadius: '255px 15px 225px 15px/15px 225px 15px 255px' }}
+                      className={`px-3 py-1 text-[9px] font-black uppercase tracking-[0.1em] border-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 ${enabled ? 'bg-white/10 border-white text-white shadow-lg' : 'bg-transparent border-white/20 text-white/20'}`}
+                    >
+                      <span>{agent.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
-            {/* RALPH Pipeline Visualization */}
-            {isAnalyzing && (
-              <div className="ralph-docked">
-                <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="ralph-card bg-[#fffdf9] border-2 border-[#e6e0d8] rounded-[3rem] p-10 shadow-2xl">
-                  <div className="ralph-track flex items-center justify-around max-w-4xl mx-auto relative">
-                    <div className="absolute h-1 bg-[#e6e0d8] left-[10%] right-[10%] top-6 -z-10"></div>
-                    <RALPHIndicator phase="R" label="분석" active={timeline.some(s => s.status === 'reasoning')} completed={timeline.some(s => s.status === 'agency_gathering')} />
-                    <RALPHIndicator phase="A" label="수집" active={timeline.some(s => s.status === 'agency_gathering')} completed={timeline.some(s => s.status === 'logic_validation')} />
-                    <RALPHIndicator phase="L" label="검증" active={timeline.some(s => s.status === 'logic_validation')} completed={timeline.some(s => s.status === 'polish_synthesis')} />
-                    <RALPHIndicator phase="P" label="정리" active={timeline.some(s => s.status === 'polish_synthesis')} completed={!!results} />
-                    <RALPHIndicator phase="H" label="관리" active={true} completed={!!results} />
-                  </div>
-                </motion.div>
-              </div>
-            )}
+            {/* Notification/Filter logs */}
+            <div className="fixed sm:absolute top-2 sm:top-6 right-2 sm:right-6 flex flex-col items-end gap-2 pointer-events-none z-50">
+              {filterLogs.map(f => (
+                <div key={f.id} className="bg-[#fff2d9] text-[#8a5b10] px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest shadow-xl border border-[#fee4b3] pointer-events-auto">{f.text}</div>
+              ))}
+              {toast.visible && (
+                <div className="bg-[#b48a3c] text-white px-6 py-3 rounded-2xl shadow-2xl text-xs font-black uppercase tracking-widest pointer-events-auto animate-bounce">{toast.message}</div>
+              )}
+            </div>
+          </header>
 
-            <div className="portal-content-wrap">
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-12">
-                {/* Activity Sidebar */}
-                <aside className="lg:col-span-3">
-                  <div className="bg-[#fffdf9] border-2 border-[#e6e0d8] rounded-[3rem] p-8 h-[680px] flex flex-col shadow-2xl relative overflow-hidden">
-                    <div className="flex bg-[#f4eee6] p-2 rounded-3xl mb-10">
-                      <button onClick={() => setActiveSidebarTab('live')} className={`flex-1 py-4 rounded-[1.2rem] text-[10px] font-black uppercase tracking-widest transition-all ${activeSidebarTab === 'live' ? 'bg-[#fffdf9] text-[#1f2a44] shadow-xl' : 'text-[#8a8178]'}`}>실시간</button>
-                      <button onClick={() => setActiveSidebarTab('history')} className={`flex-1 py-4 rounded-[1.2rem] text-[10px] font-black uppercase tracking-widest transition-all ${activeSidebarTab === 'history' ? 'bg-[#fffdf9] text-[#1f2a44] shadow-xl' : 'text-[#8a8178]'}`}>기록</button>
+          {/* Integrated Process Flow */}
+          <AnimatePresence>
+            {isAnalyzing && (
+              <motion.div
+                initial={{ opacity: 0, height: 0, marginTop: 0 }}
+                animate={{ opacity: 1, height: 'auto', marginTop: 24 }}
+                exit={{ opacity: 0, height: 0, marginTop: 0 }}
+                className="process-bar-container overflow-hidden"
+              >
+                <div className="process-track" />
+                <ProcessIndicator phase="A" label="분석" active={timeline.some(s => s.status === 'reasoning')} completed={timeline.some(s => s.status === 'agency_gathering')} />
+                <ProcessIndicator phase="C" label="수집" active={timeline.some(s => s.status === 'agency_gathering')} completed={timeline.some(s => s.status === 'logic_validation')} />
+                <ProcessIndicator phase="V" label="검증" active={timeline.some(s => s.status === 'logic_validation')} completed={timeline.some(s => s.status === 'polish_synthesis')} />
+                <ProcessIndicator phase="S" label="정리" active={timeline.some(s => s.status === 'polish_synthesis')} completed={!!results} />
+                <ProcessIndicator phase="M" label="관리" active={true} completed={!!results} />
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
+        <div className="portal-content-wrap">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-12">
+            {/* Activity Sidebar */}
+            <aside className="lg:col-span-3">
+              <div className="bg-[#fffdf9] border-2 border-[#e6e0d8] rounded-[3rem] p-8 h-[680px] flex flex-col shadow-2xl relative overflow-hidden">
+                <div className="flex bg-[#f4eee6] p-2 rounded-3xl mb-10">
+                  <button onClick={() => setActiveSidebarTab('live')} className={`flex-1 py-4 rounded-[1.2rem] text-[10px] font-black uppercase tracking-widest transition-all ${activeSidebarTab === 'live' ? 'bg-[#fffdf9] text-[#1f2a44] shadow-xl' : 'text-[#8a8178]'}`}>실시간</button>
+                  <button onClick={() => setActiveSidebarTab('history')} className={`flex-1 py-4 rounded-[1.2rem] text-[10px] font-black uppercase tracking-widest transition-all ${activeSidebarTab === 'history' ? 'bg-[#fffdf9] text-[#1f2a44] shadow-xl' : 'text-[#8a8178]'}`}>기록</button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto custom-scrollbar pr-2">
+                  <AnimatePresence mode="wait">
+                    {activeSidebarTab === 'live' ? (
+                      <div className="space-y-10">
+                        {timeline.map((s, i) => (
+                          <div key={i} className="flex gap-6 group">
+                            <div className={`w-1 rounded-full ${i === timeline.length - 1 ? 'bg-[#1f2a44] shadow-[0_0_10px_rgba(31,42,68,0.8)] scale-y-110' : 'bg-[#e6e0d8]'}`} />
+                            <div className="py-1">
+                              <span className="text-[10px] font-black text-[#1f2a44]/70 group-last:text-[#1f2a44]">{s.time}</span>
+                              <p className={`text-[13px] font-bold mt-1 leading-relaxed ${i === timeline.length - 1 ? 'text-[#1f2a44]' : 'text-[#4b433d]'}`}>{s.message}</p>
+                            </div>
+                          </div>
+                        ))}
+                        <div ref={timelineEndRef} />
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 gap-4">
+                        {history.map(h => (
+                          <div key={h.id} onClick={() => selectHistory(h)} className="p-6 bg-[#f5f2ed] border border-[#e6e0d8] rounded-3xl cursor-pointer hover:bg-[#e6e0d8] transition-all">
+                            <p className="text-xs font-black line-clamp-2 mb-3 text-[#1f2a44]">{h.prompt}</p>
+                            <div className="flex justify-between items-center text-[#4b433d] opacity-60"><span className="text-[9px] font-bold">{new Date(h.created_at).toLocaleDateString()}</span><Trash2 className="w-3.5 h-3.5 hover:text-red-500 transition-colors" onClick={(e) => deleteHistory(e, h.id)} /></div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              </div>
+            </aside>
+
+            {/* Main Visual Intelligence Area */}
+            <main className="lg:col-span-9 space-y-12">
+
+              {isAnalyzing && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 h-[680px]">
+                  {enabledAgents.perplexity && (
+                    <StreamingCard
+                      title="검색 (Perplexity)"
+                      icon={Zap}
+                      color="sky"
+                      text={liveResults.perplexity}
+                      status={liveResults.perplexity.includes('에러') ? 'error' : liveResults.perplexity ? 'active' : 'active'}
+                    />
+                  )}
+                  {enabledAgents.chatgpt && (
+                    <StreamingCard
+                      title="추론 (ChatGPT)"
+                      icon={Bot}
+                      color="emerald"
+                      text={liveResults.chatgpt}
+                      status={liveResults.chatgpt.includes('에러') ? 'error' : liveResults.chatgpt ? 'active' : 'active'}
+                    />
+                  )}
+                  {enabledAgents.gemini && (
+                    <StreamingCard
+                      title="창의 (Gemini)"
+                      icon={Sparkles}
+                      color="indigo"
+                      text={liveResults.gemini}
+                      status={liveResults.gemini.includes('에러') || liveResults.gemini.includes('signed out') ? 'error' : liveResults.gemini ? 'active' : 'active'}
+                    />
+                  )}
+                  {enabledAgents.claude && (
+                    <StreamingCard
+                      title="검증 (Claude)"
+                      icon={Brain}
+                      color="amber"
+                      text={liveResults.claude}
+                      status={liveResults.claude.includes('에러') ? 'error' : liveResults.claude ? 'active' : 'active'}
+                    />
+                  )}
+                </div>
+              )}
+
+              {!isAnalyzing && results && (
+                <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} className="space-y-12">
+                  <div className="flex flex-col md:flex-row items-center justify-between gap-8">
+                    <div className="flex p-2 bg-[#fffdf9] border-2 border-[#e6e0d8] rounded-[2.5rem] shadow-2xl">
+                      {[{ id: 'optimal', icon: BarChart3, label: '종합 인텔리전스' }, { id: 'individual', icon: Layout, label: '에이전트 원본' }, { id: 'report', icon: Brain, label: '논리 검증 보고서' }].map(t => (
+                        <button key={t.id} onClick={() => setActiveTab(t.id)} className={`relative px-10 py-5 rounded-[1.8rem] text-[12px] font-black uppercase tracking-widest transition-all z-10 ${activeTab === t.id ? 'text-white' : 'text-[#4b433d]'}`}>
+                          {activeTab === t.id && <motion.div layoutId="premium-tab" className="absolute inset-0 bg-[#1f2a44] rounded-[1.8rem] -z-10 shadow-xl shadow-[#1f2a44]/30" />}
+                          <div className="flex items-center gap-3"><t.icon className="w-3.5 h-3.5" />{t.label}</div>
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex flex-wrap gap-2 items-center justify-end">
+                      <ExportButton type="pdf" label="PDF" icon={FileText} />
+                      <ExportButton type="html" label="HTML" icon={Layout} />
+                      <ExportButton type="md" label="MARKDOWN" icon={FileDown} />
+                    </div>
+                  </div>
+
+                  <div className="bg-[#fffdf9] border-2 border-[#e6e0d8] rounded-[4rem] p-16 shadow-2xl min-h-[600px] relative overflow-hidden">
+                    {/* Trust Seal */}
+                    <div className="absolute top-10 right-10 z-20 pointer-events-none opacity-20 group-hover:opacity-40 transition-opacity">
+                      <div className="flex flex-col items-center rotate-12 border-4 border-[#b48a3c] p-4 rounded-[2rem]">
+                        <ShieldCheck className="w-12 h-12 text-[#b48a3c]" />
+                        <span className="text-[10px] font-black text-[#b48a3c] tracking-tighter mt-1">INTELLIGENCE VERIFIED</span>
+                      </div>
                     </div>
 
-                    <div className="flex-1 overflow-y-auto custom-scrollbar pr-2">
+                    <div className="relative z-10">
                       <AnimatePresence mode="wait">
-                        {activeSidebarTab === 'live' ? (
-                          <div className="space-y-10">
-                            {timeline.map((s, i) => (
-                              <div key={i} className="flex gap-6 group">
-                                <div className={`w-1 rounded-full ${i === timeline.length - 1 ? 'bg-[#1f2a44] shadow-[0_0_10px_rgba(31,42,68,0.8)] scale-y-110' : 'bg-[#e6e0d8]'}`} />
-                                <div className="py-1">
-                                  <span className="text-[10px] font-black text-[#1f2a44]/70 group-last:text-[#1f2a44]">{s.time}</span>
-                                  <p className={`text-[13px] font-bold mt-1 leading-relaxed ${i === timeline.length - 1 ? 'text-[#1f2a44]' : 'text-[#4b433d]'}`}>{s.message}</p>
-                                </div>
+                        {activeTab === 'optimal' && (
+                          <motion.div key="opt" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
+                            <ReportMeta
+                              title="종합 인텔리전스 보고서"
+                              timestamp={reportTimestamp}
+                              agents={enabledAgentNames}
+                              summary={reportInsights.summary}
+                            />
+                            <MarkdownContent content={results.optimalAnswer} />
+                          </motion.div>
+                        )}
+                        {activeTab === 'individual' && (
+                          <motion.div key="ind" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                            {Object.entries(results.results || {}).map(([k, v]) => (
+                              <div key={k} className="p-10 bg-[#fffdf9] border border-[#e6e0d8] rounded-[2.5rem] shadow-sm">
+                                <h3 className="text-[11px] font-black text-[#1f2a44] uppercase tracking-[0.2em] mb-6 border-b border-[#e6e0d8] pb-3 flex items-center justify-between">
+                                  <span>{k} AGENT RESPONSE</span>
+                                  <div className="w-2 h-2 rounded-full bg-[#b48a3c]" />
+                                </h3>
+                                <p className="text-[15px] leading-relaxed text-[#1f2a44] whitespace-pre-wrap font-medium">{v || "데이터 수집 실패"}</p>
                               </div>
                             ))}
-                            <div ref={timelineEndRef} />
-                          </div>
-                        ) : (
-                          <div className="grid grid-cols-1 gap-4">
-                            {history.map(h => (
-                              <div key={h.id} onClick={() => selectHistory(h)} className="p-6 bg-[#f5f2ed] border border-[#e6e0d8] rounded-3xl cursor-pointer hover:bg-[#e6e0d8] transition-all">
-                                <p className="text-xs font-black line-clamp-2 mb-3 text-[#1f2a44]">{h.prompt}</p>
-                                <div className="flex justify-between items-center text-[#4b433d] opacity-60"><span className="text-[9px] font-bold">{new Date(h.created_at).toLocaleDateString()}</span><Trash2 className="w-3.5 h-3.5 hover:text-red-500 transition-colors" onClick={(e) => deleteHistory(e, h.id)} /></div>
-                              </div>
-                            ))}
-                          </div>
+                          </motion.div>
+                        )}
+                        {activeTab === 'report' && (
+                          <motion.div key="rep" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
+                            <ReportMeta
+                              title="논리 검증 보고서"
+                              timestamp={reportTimestamp}
+                              agents={enabledAgentNames}
+                            />
+                            <MarkdownContent content={results.validationReport} />
+                          </motion.div>
                         )}
                       </AnimatePresence>
                     </div>
                   </div>
-                </aside>
+                </motion.div>
+              )}
 
-                {/* Main Visual Intelligence Area */}
-                <main className="lg:col-span-9 space-y-12">
-
-                  {isAnalyzing && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 h-[680px]">
-                      {enabledAgents.perplexity && (
-                        <StreamingCard
-                          title="검색 (Perplexity)"
-                          icon={Zap}
-                          color="sky"
-                          text={liveResults.perplexity}
-                          status={liveResults.perplexity.includes('에러') ? 'error' : liveResults.perplexity ? 'active' : 'active'}
-                        />
-                      )}
-                      {enabledAgents.chatgpt && (
-                        <StreamingCard
-                          title="추론 (ChatGPT)"
-                          icon={Bot}
-                          color="emerald"
-                          text={liveResults.chatgpt}
-                          status={liveResults.chatgpt.includes('에러') ? 'error' : liveResults.chatgpt ? 'active' : 'active'}
-                        />
-                      )}
-                      {enabledAgents.gemini && (
-                        <StreamingCard
-                          title="창의 (Gemini)"
-                          icon={Sparkles}
-                          color="indigo"
-                          text={liveResults.gemini}
-                          status={liveResults.gemini.includes('에러') || liveResults.gemini.includes('signed out') ? 'error' : liveResults.gemini ? 'active' : 'active'}
-                        />
-                      )}
-                      {enabledAgents.claude && (
-                        <StreamingCard
-                          title="검증 (Claude)"
-                          icon={Brain}
-                          color="amber"
-                          text={liveResults.claude}
-                          status={liveResults.claude.includes('에러') ? 'error' : liveResults.claude ? 'active' : 'active'}
-                        />
-                      )}
-                    </div>
-                  )}
-
-                  {!isAnalyzing && results && (
-                    <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} className="space-y-12">
-                      <div className="flex flex-col md:flex-row items-center justify-between gap-8">
-                        <div className="flex p-2 bg-[#fffdf9] border-2 border-[#e6e0d8] rounded-[2.5rem] shadow-2xl">
-                          {[{ id: 'optimal', icon: BarChart3, label: '종합 인텔리전스' }, { id: 'individual', icon: Layout, label: '에이전트 원본' }, { id: 'report', icon: Brain, label: '논리 검증 보고서' }].map(t => (
-                            <button key={t.id} onClick={() => setActiveTab(t.id)} className={`relative px-10 py-5 rounded-[1.8rem] text-[12px] font-black uppercase tracking-widest transition-all z-10 ${activeTab === t.id ? 'text-white' : 'text-[#4b433d]'}`}>
-                              {activeTab === t.id && <motion.div layoutId="premium-tab" className="absolute inset-0 bg-[#1f2a44] rounded-[1.8rem] -z-10 shadow-xl shadow-[#1f2a44]/30" />}
-                              <div className="flex items-center gap-3"><t.icon className="w-4 h-4" />{t.label}</div>
-                            </button>
-                          ))}
-                        </div>
-                        <div className="flex flex-wrap gap-3 items-center justify-end">
-                          <ExportButton type="pdf" label="PDF 내보내기" />
-                          <ExportButton type="html" label="HTML 내보내기" />
-                          <ExportButton type="md" label="MD 내보내기" />
-                        </div>
-                      </div>
-
-                      <div className="bg-[#fffdf9] border-2 border-[#e6e0d8] rounded-[4rem] p-16 shadow-2xl min-h-[600px] relative overflow-hidden">
-                        {/* RALPH Trust Seal */}
-                        <div className="absolute top-10 right-10 z-20 pointer-events-none opacity-20 group-hover:opacity-40 transition-opacity">
-                          <div className="flex flex-col items-center rotate-12 border-4 border-[#b48a3c] p-4 rounded-full">
-                            <ShieldCheck className="w-12 h-12 text-[#b48a3c]" />
-                            <span className="text-[10px] font-black text-[#b48a3c] tracking-widest mt-1">RALPH VERIFIED</span>
-                          </div>
-                        </div>
-
-                        <div className="relative z-10">
-                          <AnimatePresence mode="wait">
-                            {activeTab === 'optimal' && (
-                              <motion.div key="opt" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
-                                <ReportMeta
-                                  title="종합 인텔리전스 보고서"
-                                  timestamp={reportTimestamp}
-                                  agents={enabledAgentNames}
-                                  summary={reportInsights.summary}
-                                />
-                                <MarkdownContent content={results.optimalAnswer} />
-                              </motion.div>
-                            )}
-                            {activeTab === 'individual' && (
-                              <motion.div key="ind" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                                {Object.entries(results.results || {}).map(([k, v]) => (
-                                  <div key={k} className="p-10 bg-[#f8f9fa] rounded-[3rem] border border-[#e9ecef] shadow-sm">
-                                    <h3 className="text-[11px] font-black text-[#1f2a44] uppercase tracking-[0.2em] mb-6 border-b border-[#dee2e6] pb-3 flex items-center justify-between">
-                                      <span>{k} AGENT RESPONSE</span>
-                                      <div className="w-2 h-2 rounded-full bg-[#b48a3c]" />
-                                    </h3>
-                                    <p className="text-[15px] leading-relaxed text-[#1f2a44] whitespace-pre-wrap font-medium">{v || "데이터 수집 실패"}</p>
-                                  </div>
-                                ))}
-                              </motion.div>
-                            )}
-                            {activeTab === 'report' && (
-                              <motion.div key="rep" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
-                                <ReportMeta
-                                  title="논리 검증 보고서"
-                                  timestamp={reportTimestamp}
-                                  agents={enabledAgentNames}
-                                />
-                                <MarkdownContent content={results.validationReport} />
-                              </motion.div>
-                            )}
-                          </AnimatePresence>
-                        </div>
-                      </div>
-                    </motion.div>
-                  )}
-
-                  {!isAnalyzing && !results && (
-                    <div className="h-[650px] border-4 border-dashed border-[#e6e0d8] rounded-[5rem] flex flex-col items-center justify-center space-y-10 group overflow-hidden relative">
-                      <div className="absolute inset-0 bg-[#b48a3c]/5 opacity-0 group-hover:opacity-100 transition-opacity duration-1000 blur-[100px]"></div>
-                      <motion.div animate={{ y: [0, -20, 0] }} transition={{ duration: 6, repeat: Infinity }}><Bot className="w-48 h-48 opacity-40 group-hover:opacity-60 transition-all text-[#1f2a44]" /></motion.div>
-                      <div className="text-center space-y-6">
-                        <p className="text-[13px] font-black uppercase tracking-[0.8em] text-[#1f2a44]">Multi Agent Analysis 대기</p>
-                        <p className="text-sm font-bold text-[#4b433d] italic opacity-80">고정밀 분석 준비 완료 · 에이전트를 선택하고 질문을 시작하세요</p>
-                      </div>
-                    </div>
-                  )}
-                </main>
-              </div>
-            </div>
+              {!isAnalyzing && !results && (
+                <div className="h-[650px] border-4 border-dashed border-[#e6e0d8] rounded-[5rem] flex flex-col items-center justify-center space-y-10 group overflow-hidden relative">
+                  <div className="absolute inset-0 bg-[#b48a3c]/5 opacity-0 group-hover:opacity-100 transition-opacity duration-1000 blur-[100px]"></div>
+                  <motion.div animate={{ y: [0, -20, 0] }} transition={{ duration: 6, repeat: Infinity }}><Bot className="w-48 h-48 opacity-40 group-hover:opacity-60 transition-all text-[#1f2a44]" /></motion.div>
+                  <div className="text-center space-y-6">
+                    <p className="text-[13px] font-black uppercase tracking-[0.8em] text-[#1f2a44]">Multi Agent Analysis 대기</p>
+                    <p className="text-sm font-bold text-[#4b433d] italic opacity-80">고정밀 분석 준비 완료 · 에이전트를 선택하고 질문을 시작하세요</p>
+                  </div>
+                </div>
+              )}
+            </main>
           </div>
         </div>
       </div>
-      <style dangerouslySetInnerHTML={{
-        __html: `
-        .portal-shell { min-height: 100vh; background: radial-gradient(1000px 700px at 15% -10%, rgba(56, 189, 248, 0.12), transparent 60%), radial-gradient(900px 650px at 90% 0%, rgba(34, 197, 94, 0.12), transparent 55%), linear-gradient(180deg, #f4f7fb 0%, #f7fafc 50%, #ffffff 100%); position: relative; color: #1f2a44; }
-        .portal-shell::before { content: ""; position: fixed; inset: 0; pointer-events: none; background-image: radial-gradient(rgba(15, 23, 42, 0.05) 1px, transparent 1px); background-size: 80px 80px; opacity: 0.22; z-index: 0; }
-        .portal-header-wrap { position: sticky; top: 12px; z-index: 40; background: rgba(255, 255, 255, 0.82); border: 1px solid rgba(148, 163, 184, 0.25); border-radius: 28px; padding: 14px; backdrop-filter: blur(16px); box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08); }
-        .portal-content-wrap { position: relative; margin-top: 8px; }
-        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #b48a3c; border-radius: 20px; }
-        .scrollbar-hide::-webkit-scrollbar { display: none; }
-        
-        /* Prose Override - UI 개선안 v3 반영 */
-        .prose h1, .prose h2 { font-weight: 800; letter-spacing: -0.05em; color: #1f2a44; margin-top: 3.5rem; margin-bottom: 2rem; font-size: 28px; }
-        .prose h3 { font-weight: 800; letter-spacing: -0.05em; color: #1f2a44; margin-top: 2.5rem; margin-bottom: 1.5rem; font-size: 18px; }
-        .prose p { line-height: 1.8; font-weight: 500; margin-bottom: 1.8rem; font-size: 16px; text-align: left; color: #1f2a44; }
-        .prose strong { color: #1f2a44; font-weight: 900; text-underline-offset: 4px; border-bottom: 2px solid rgba(180, 138, 60, 0.2); }
-        .prose hr { border: 0; height: 1px; background: #e9ecef; margin: 4rem 0; }
-        .prose ul, .prose ol { margin-bottom: 2rem; }
-        .prose li { margin-bottom: 0.8rem; line-height: 1.7; color: #1f2a44; font-weight: 500; }
-        
-        .prose table { width: 100%; border-collapse: separate; border-spacing: 0; margin: 2.5rem 0; font-size: 0.95rem; border: 1px solid #e9ecef; border-radius: 12px; overflow: hidden; }
-        .prose th, .prose td { border: 1px solid #e9ecef; padding: 1rem 1.2rem; vertical-align: top; }
-        .prose th { background: #f8f9fa; text-align: left; font-weight: 800; color: #1f2a44; text-transform: uppercase; font-size: 11px; letter-spacing: 0.1em; }
-        .prose td { color: #1f2a44; background: white; }
-
-        /* Input / Placeholder Style */
-        input::placeholder { color: #1f2a44 !important; opacity: 0.55 !important; font-weight: 600; }
-        
-        .logo-replacer { width: 56px; height: 56px; display: inline-block; background-size: calc(100% - 12px) calc(100% - 12px); background-position: center; background-repeat: no-repeat; border-radius: 12px; transition: transform .18s ease, box-shadow .18s ease; box-shadow: 0 4px 10px rgba(0,0,0,0.08); }
-        .logo-replacer:hover { transform: scale(1.08); box-shadow: 0 8px 22px rgba(0,0,0,0.12); }
-        .dbg-hidden { display: none !important; }
-        .ralph-docked { display: flex; justify-content: flex-start; margin: 12px 0 10px; }
-        .ralph-card { width: min(320px, 100%); padding: 10px 12px !important; border-radius: 24px !important; }
-        .ralph-track { transform: scale(0.74); transform-origin: left center; gap: 6px; }
-        `
-      }} />
-    </div>
+    </div >
   );
 }
 
