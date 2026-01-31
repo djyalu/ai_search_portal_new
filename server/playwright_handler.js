@@ -3,6 +3,7 @@ import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import NotionService from './notion_service.js';
 
 chromium.use(StealthPlugin());
 
@@ -215,9 +216,18 @@ async function isGeminiSignedOut(page) {
             const hasInput = inputSelectors.some(sel => hasSelectorDeep(document.body, sel));
             if (hasInput) return false;
 
-            const signInBtn = document.querySelector('a[href*="/signin"], a[href*="/login"], [aria-label*="Sign in"], button.sign-in');
+            // Strict Sign-In Check
+            const signInLinks = Array.from(document.querySelectorAll('a[href*="accounts.google.com"], a[href*="ServiceLogin"]'));
+            if (signInLinks.some(l => l.innerText.includes('Sign in') || l.innerText.includes('로그인'))) return true;
+
             const bodyText = document.body ? document.body.innerText || '' : '';
-            return !!(signInBtn || bodyText.includes('Sign in') || bodyText.includes('로그인하세요'));
+            // Updated signatures based on debugging
+            return !!(
+                bodyText.includes('Sign in to Gemini') ||
+                bodyText.includes('Sign in Gemini') ||
+                bodyText.includes('Conversation with Gemini') && bodyText.includes('Sign in') ||
+                (bodyText.includes('Sign in') && bodyText.includes('Google'))
+            );
         });
     } catch (_) {
         return false;
@@ -232,6 +242,21 @@ async function isClaudeSignedOut(page) {
                 document.querySelector('a[href*="/login"], a[href*="/register"]') ||
                 bodyText.includes('Sign in to Claude') ||
                 bodyText.includes('Welcome back') && bodyText.includes('Email')
+            );
+        });
+    } catch (_) {
+        return false;
+    }
+}
+
+async function isChatGPTSignedOut(page) {
+    try {
+        return await page.evaluate(() => {
+            const bodyText = document.body ? document.body.innerText || '' : '';
+            return !!(
+                document.querySelector('button[data-testid="login-button"]') ||
+                document.querySelector('a[href="/login"]') ||
+                bodyText.includes('Get started') && bodyText.includes('Log in')
             );
         });
     } catch (_) {
@@ -300,12 +325,57 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
             // If a storageState is available (created by setup_auth_playwright), use it to preserve login.
             const storageStatePath = path.join(USER_DATA_DIR, 'storageState.json');
             browser = await chromium.launch(launchOptions);
+            const contextOptions = {
+                viewport: null,
+                permissions: ['clipboard-read', 'clipboard-write']
+            };
             if (fs.existsSync(storageStatePath)) {
-                browserContext = await browser.newContext({ storageState: storageStatePath, viewport: null });
-            } else {
-                // ephemeral context avoids sharing USER_DATA_DIR across concurrent runs
-                browserContext = await browser.newContext({ viewport: null });
+                contextOptions.storageState = storageStatePath;
             }
+            browserContext = await browser.newContext(contextOptions);
+
+            // New Helper: Paste Input to bypass React State issues
+            const pasteInput = async (page, text) => {
+                await page.evaluate((t) => navigator.clipboard.writeText(t), text);
+                await page.keyboard.press('Control+V');
+            };
+
+            // New Helper: MutationObserver for Robust Extraction
+            const injectObserver = async (page) => {
+                await page.evaluate(() => {
+                    window.__RALPH_LATEST = "";
+                    window.__RALPH_LAST_LEN = 0;
+                    const observer = new MutationObserver((mutations) => {
+                        let text = "";
+                        let source = "body";
+                        // Gemini Specific: Target 'model-response'
+                        const geminiResponses = document.querySelectorAll('model-response, .model-response, [data-testid="response-content"]');
+                        if (geminiResponses.length > 0) {
+                            // Get the last one
+                            const last = geminiResponses[geminiResponses.length - 1];
+                            const specificText = last.innerText || "";
+                            // Smart Fallback: If specific container is empty/too short, ignore it
+                            if (specificText.length > 20) {
+                                text = specificText;
+                                source = "model-response";
+                            }
+                        }
+
+                        if (!text) {
+                            // Fallback to body text logic
+                            text = document.body.innerText || "";
+                            source = "body";
+                        }
+
+                        if (text.length > window.__RALPH_LAST_LEN) {
+                            window.__RALPH_LATEST = text;
+                            window.__RALPH_LAST_LEN = text.length;
+                            window.__RALPH_DEBUG = `Source: ${source}, Len: ${text.length}`;
+                        }
+                    });
+                    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+                });
+            };
 
             // --- 1. Reasoning Phase (R) ---
             logInternal(`Reasoning Phase 시작. Prompt sent to Perplexity...`);
@@ -361,9 +431,9 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
 
             const workers = [
                 { id: 'perplexity', name: 'Perplexity', url: 'https://www.perplexity.ai/', input: ['textarea[placeholder*="Ask"]', '#ask-input', '[data-lexical-editor="true"]', 'div[contenteditable="true"]', 'textarea'], result: ['[data-testid="answer"]', '.prose', '.result', '.pplx-stream'] },
-                { id: 'chatgpt', name: 'ChatGPT', url: 'https://chatgpt.com/', input: ['#prompt-textarea', 'textarea[placeholder*="ChatGPT"]', 'textarea'], result: ['[data-testid*="conversation-result"] .markdown', '.markdown', 'article .markdown'] },
+                { id: 'chatgpt', name: 'ChatGPT', url: 'https://chatgpt.com/', input: ['#prompt-textarea', 'textarea[placeholder*="ChatGPT"]', 'textarea'], result: ['[data-message-author-role="assistant"] .markdown', '.markdown', 'div.markdown', 'div[class*="markdown"]', 'article'] },
                 { id: 'gemini', name: 'Gemini', url: 'https://gemini.google.com/app', input: ['rich-textarea .ql-editor[contenteditable="true"]', 'div.input-area ql-editor', '[data-node-type="input-area"] .ql-editor[contenteditable="true"]', 'div.ql-editor[contenteditable="true"]', 'div[contenteditable="true"]', 'textarea'], result: ['[data-testid="response-content"]', '[data-testid="assistant-response"]', 'model-response', '.message-content', '.assistant-response', 'article'] },
-                { id: 'claude', name: 'Claude', url: 'https://claude.ai/new', input: ['div[contenteditable="true"][aria-label*="Claude"]', '[data-testid="chat-input"]', '[data-testid="message-input"]', 'div[contenteditable="true"][data-testid]', 'div[contenteditable="true"]', 'textarea[aria-label]', 'textarea', '#prompt-textarea', 'textarea[placeholder]', '[role="textbox"]'], result: ['[data-testid="assistant-message"] [data-testid="message-text"]', '[data-testid="assistant-message"] .font-claude-message', '[data-testid="assistant-message"] .prose', '[data-testid="assistant-message"]', '.message-content'] }
+                { id: 'claude', name: 'Claude', url: 'https://claude.ai/new', input: ['div[contenteditable="true"][aria-label*="Claude"]', '[data-testid="chat-input"]', '[data-testid="message-input"]', 'div[contenteditable="true"][data-testid]', 'div[contenteditable="true"]', 'textarea[aria-label]', 'textarea', '#prompt-textarea', 'textarea[placeholder]', '[role="textbox"]'], result: ['[data-testid="assistant-message"]', '.font-claude-message', '.font-user-message', 'div[class*="font-claude"]', 'div[class*="message"]', '.prose', '.message-content'] }
             ];
             const workerById = Object.fromEntries(workers.map(w => [w.id, w]));
             const activeWorkers = workers.filter(w => enabledAgents[w.id]);
@@ -407,6 +477,25 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
                                 return { id: worker.id, value: 'Claude is signed out. Please refresh session.' };
                             }
                         }
+                        // Clear potential modals
+                        await page.evaluate(() => {
+                            const modalButtons = [
+                                'button:has-text("Acknowledge")', 'button:has-text("I agree")',
+                                'button:has-text("Got it")', 'button[aria-label="Close"]',
+                                '.modal button', '[role="dialog"] button'
+                            ];
+                            modalButtons.forEach(sel => {
+                                const btn = document.querySelector(sel);
+                                if (btn && btn.offsetParent !== null) btn.click();
+                            });
+                        }).catch(() => { });
+                    }
+
+                    if (worker.id === 'chatgpt') {
+                        const signedOut = await isChatGPTSignedOut(page);
+                        if (signedOut) {
+                            return { id: worker.id, value: 'ChatGPT session expired. Please refresh login.' };
+                        }
                     }
 
                     // try multiple input selectors in order
@@ -419,20 +508,74 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
                     let inputUsed = false;
                     for (const sel of (Array.isArray(worker.input) ? worker.input : [worker.input])) {
                         try {
-                            await page.waitForSelector(sel, { timeout: 8000 });
-                            if (worker.id === 'gemini' || worker.id === 'claude') {
-                                // For rich editors, click and insertText is more reliable
+                            if (worker.id === 'claude' || worker.id === 'gemini') {
+                                // NEW STRATEGY: Click -> Paste -> Triple Send Trigger
                                 await page.click(sel);
-                                await page.keyboard.insertText(workerPrompt);
-                                const sent = await tryClickSend(page);
-                                if (!sent) await page.keyboard.press('Enter');
+                                await delay(500);
+                                await pasteInput(page, workerPrompt);
+                                await delay(800);
+                                logInternal(`Worker ${worker.id} inputs pasted.`);
+
+                                // Helper to check if processing started
+                                const checkStarted = async () => {
+                                    return await page.evaluate(() => {
+                                        const indicators = [
+                                            '.streaming', '.typing', '.thinking', '[data-testid="loading-indicator"]',
+                                            'svg.animate-spin', '.dot-flashing', '.progress-bar',
+                                            'button[aria-label*="Stop"]', 'button[aria-label*="중단"]', 'button[data-testid*="stop"]',
+                                            'model-response', '.result-streaming'
+                                        ];
+                                        return indicators.some(sel => !!document.querySelector(sel));
+                                    });
+                                };
+
+                                // 1. Control + Enter
+                                await page.keyboard.press('Control+Enter');
+                                await delay(1000);
+                                if (await checkStarted()) {
+                                    logInternal(`Worker ${worker.id} started via Control+Enter.`);
+                                } else {
+                                    // 2. Enter (Fallback)
+                                    const activeElement = await page.evaluate(() => document.activeElement.tagName);
+                                    if (activeElement === 'BODY') await page.click(sel);
+                                    await page.keyboard.press('Enter');
+                                    await delay(1000);
+
+                                    if (await checkStarted()) {
+                                        logInternal(`Worker ${worker.id} started via Enter.`);
+                                    } else {
+                                        // 3. Click Send Button (Ultimate Fallback)
+                                        await tryClickSend(page);
+                                        logInternal(`Worker ${worker.id} tried Click Send.`);
+                                    }
+                                }
                             } else {
-                                await page.fill(sel, workerPrompt);
-                                await page.keyboard.press('Enter');
+                                // Legacy Logic (ChatGPT / Perplexity)
+                                if (['chatgpt'].includes(worker.id)) {
+                                    await page.click(sel);
+                                    await delay(300);
+                                    await page.keyboard.type(workerPrompt, { delay: 1 }); // Type is safer for ChatGPT than insertText due to validation
+                                    await delay(800);
+
+                                    const sent = await tryClickSend(page);
+                                    if (!sent) {
+                                        await page.keyboard.press('Enter'); // ChatGPT prefers simple Enter
+                                    }
+                                } else {
+                                    // Perplexity
+                                    await page.fill(sel, workerPrompt);
+                                    await page.keyboard.press('Enter');
+                                }
                             }
                             inputUsed = true;
-                            // Wait a bit for the UI to transition and the result element to start appearing
+
+                            // Initialize Observer for extraction (Gemini/Claude)
+                            if (worker.id === 'claude' || worker.id === 'gemini') {
+                                await injectObserver(page);
+                            }
+
                             const resultSels = Array.isArray(worker.result) ? worker.result : [worker.result];
+                            // Wait for result container or timeout
                             await Promise.race([
                                 page.waitForSelector(resultSels[0], { timeout: 15000 }).catch(() => { }),
                                 delay(5000)
@@ -447,11 +590,12 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
 
                     // streaming/read loop with adaptive polling and stability checks
                     const delayMs = 2000;
-                    const maxWait = SERVICE_MAX_WAIT[worker.id] || 40000;
+                    const maxWait = SERVICE_MAX_WAIT[worker.id] || 60000;
                     const maxIters = Math.ceil(maxWait / delayMs);
-                    const minLength = 12;
+                    const minLength = 1;
                     let lastText = "";
                     let stableCount = 0;
+                    let lastChangeTick = 0;
 
                     for (let i = 0; i < maxIters; i++) {
                         try {
@@ -463,55 +607,94 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
                                     '.streaming', '.typing', '.thinking', '[data-testid="loading-indicator"]',
                                     'svg.animate-spin', '.dot-flashing', '.progress-bar',
                                     'button[aria-label*="Stop"]', 'button[aria-label*="중단"]', 'button[data-testid*="stop"]',
-                                    'button[aria-label="Cancel"]',
+                                    'button[aria-label="Cancel"]', 'button[aria-label*="Stop generating"]',
                                     '.result-streaming', '.anticon-loading'
                                 ];
                                 return indicators.some(sel => !!document.querySelector(sel));
                             }).catch(() => false);
 
-                            const current = worker.id === 'gemini'
-                                ? await getGeminiResponseText(page)
-                                : await getCleanText(
+                            let candidate = "";
+                            if (worker.id === 'claude' || worker.id === 'gemini') {
+                                // Retrieve from observer
+                                const fullText = await page.evaluate(() => window.__RALPH_LATEST || document.body.innerText);
+                                candidate = fullText;
+                            } else {
+                                candidate = await getCleanText(
                                     page,
                                     (Array.isArray(worker.result) ? worker.result : [worker.result]),
-                                    { allowFallback: !['perplexity', 'gemini', 'chatgpt', 'claude'].includes(worker.id) }
+                                    { allowFallback: true }
                                 );
+                            }
+                            if (candidate && candidate.length > 0) {
+                                // Fail-fast for known login prompts (check start of text)
+                                const startText = candidate.substring(0, 200);
+                                if (startText.includes('Sign in') || startText.includes('Log in') || startText.includes('로그인') || startText.includes('Conversation with Gemini')) {
+                                    logInternal(`[Loop ${worker.id}] Detected sign-in prompt. Aborting.`);
+                                    return { id: worker.id, value: `Error: Session Expired` };
+                                }
 
-                            let candidate = current;
-                            if (candidate && candidate.length > 0 && i < 3) {
-                                logInternal(`Worker ${worker.id} candidate length: ${candidate.length}`);
+                                if (candidate.length < 100) {
+                                    logInternal(`[Loop ${worker.id}] Short content: "${candidate.replace(/\n/g, ' ')}"`);
+                                }
+                                if (i < 3) logInternal(`Worker ${worker.id} candidate length: ${candidate.length}`);
                             }
                             if (worker.id === 'claude') candidate = sanitizeClaudeOutput(candidate);
                             if (worker.id === 'perplexity') candidate = sanitizePerplexityOutput(candidate);
                             if (worker.id === 'gemini') candidate = sanitizeGeminiOutput(candidate, workerPrompt);
 
-                            if (candidate) {
+                            // DEBUG: Verbose logging every 2 seconds
+                            if (i % 1 === 0) { // Log every tick for now
+                                logInternal(`[Loop ${worker.id}] Iter: ${i}, Thinking: ${isThinking}, Len: ${candidate ? candidate.length : 0}, Stable: ${stableCount}`);
+                            }
+
+                            if (candidate && candidate.trim().length > 0) {
                                 if (candidate !== lastText) {
                                     lastText = candidate;
                                     stableCount = 0;
+                                    lastChangeTick = i;
                                     onProgress({ status: 'streaming', service: worker.id, content: lastText });
-                                } else if (lastText.length >= minLength && !isThinking) {
-                                    // Only increment stableCount if NOT thinking
+                                } else {
                                     stableCount += 1;
                                 }
+                            } else if (i === 5 && (!candidate || candidate.length === 0)) {
+                                // If 10 seconds passed and still no text, dump debug
+                                logInternal(`[Loop ${worker.id}] NO TEXT after 10s. Dumping HTML.`);
+                                try {
+                                    const html = await page.content();
+                                    const debugPath = path.join(process.cwd(), `debug_${worker.id}_loop_empty.html`);
+                                    fs.writeFileSync(debugPath, html);
+                                } catch (e) { console.error(e); }
                             }
 
-                            // 1. Stable for 1 iteration + no thinking active
-                            if ((stableCount >= 1 && lastText.length >= minLength && !isThinking) || (i === maxIters - 1)) break;
-                        } catch (loopErr) {
-                            console.warn(`Loop iteration error for ${worker.id}: ${loopErr.message}`);
-                            // If context was destroyed, we just try again next iteration (it will likely recover on new page state)
-                            if (loopErr.message.includes('destroyed') || loopErr.message.includes('navigation')) {
-                                continue;
-                            } else {
+                            // Robust Exit: 
+                            // 1. Stable for 1 tick AND not thinking, OR
+                            // 2. STALLED: No changes for 10 seconds (5 ticks) even if "thinking" seems active
+                            const isStalled = i - lastChangeTick >= 5 && lastText.length > minLength;
+
+                            if ((stableCount >= 1 && lastText.length >= minLength && !isThinking) || isStalled || (i === maxIters - 1)) {
+                                if (isStalled) logInternal(`Worker ${worker.id} stalled for 10s. Breaking loop.`);
                                 break;
                             }
+                        } catch (loopErr) {
+                            logInternal(`Worker ${worker.id} loop error: ${loopErr.message}`);
+                            if (loopErr.message.includes('destroyed')) break;
+                            continue;
                         }
                     }
 
                     if (!lastText || lastText.trim().length === 0) {
                         logInternal(`Worker ${worker.id} 완료: 텍스트 없음.`);
-                        return { id: worker.id, value: `에러: 응답 미수신` };
+                        // DEBUG: Save HTML to inspect why
+                        try {
+                            const html = await page.content();
+                            const debugPath = path.join(process.cwd(), `debug_${worker.id}_failed.html`);
+                            fs.writeFileSync(debugPath, html);
+                            logInternal(`Saved debug HTML to ${debugPath}`);
+                            // Also screenshot
+                            await page.screenshot({ path: path.join(process.cwd(), `debug_${worker.id}_failed.png`) });
+                        } catch (err) { console.error('Debug save failed:', err); }
+
+                        return { id: worker.id, value: `에러: 응답 미수신 (Debug saved)` };
                     }
 
                     logInternal(`Worker ${worker.id} 완료: ${lastText.length} 자 수집.`);
@@ -550,7 +733,7 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
                     continue;
                 }
                 const text = String(val);
-                if (text.includes('NEEDS_WEB') || text.includes('에러') || text.includes('Error') || text.includes('error')) {
+                if (text.includes('NEEDS_WEB') || text.startsWith('에러:') || text.startsWith('Error:') || text.length < 50) {
                     agentStatus[w.id] = 'error';
                 } else {
                     agentStatus[w.id] = 'ok';
@@ -585,16 +768,41 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
                     for (const sel of (Array.isArray(validator.input) ? validator.input : [validator.input])) {
                         try {
                             await logicPage.waitForSelector(sel, { timeout: 8000 });
-                            await logicPage.click(sel);
-                            await logicPage.keyboard.insertText(validationPrompt);
+                            // Robust Input Strategy (Logic Phase)
+                            if (validationId === 'claude' || validationId === 'gemini') {
+                                await logicPage.click(sel);
+                                await delay(500);
+                                await pasteInput(logicPage, validationPrompt);
+                                await delay(800);
 
-                            if (validationId === 'gemini') {
-                                const sent = await tryClickSend(logicPage);
-                                if (!sent) await logicPage.keyboard.press('Enter');
-                            } else {
+                                // 1. Control + Enter
+                                await logicPage.keyboard.press('Control+Enter');
+                                await delay(1000);
+
+                                // 2. Enter (Fallback)
+                                const activeElement = await logicPage.evaluate(() => document.activeElement.tagName);
+                                if (activeElement === 'BODY') await logicPage.click(sel);
                                 await logicPage.keyboard.press('Enter');
+                                await delay(1000);
+
+                                // 3. Click Send Button (Ultimate Fallback)
+                                await tryClickSend(logicPage);
+                            } else {
+                                // Legacy for others
+                                await logicPage.click(sel);
+                                await logicPage.keyboard.insertText(validationPrompt);
+                                await logicPage.keyboard.press('Enter');
+                                if (validationId === 'chatgpt') {
+                                    await delay(800);
+                                    await tryClickSend(logicPage);
+                                }
                             }
+
                             inputUsed = true;
+                            // Initialize Observer for extraction (Logic Phase)
+                            if (validationId === 'claude' || validationId === 'gemini') {
+                                await injectObserver(logicPage);
+                            }
                             break;
                         } catch (_) { /* try next */ }
                     }
@@ -607,14 +815,17 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
                     let stableTicks = 0;
                     for (let i = 0; i < 20; i++) {
                         await delay(2000);
-                        const current = validationId === 'gemini'
-                            ? await getGeminiResponseText(logicPage)
-                            : await getCleanText(
+                        let candidate = "";
+                        if (validationId === 'claude' || validationId === 'gemini') {
+                            const fullText = await logicPage.evaluate(() => window.__RALPH_LATEST || document.body.innerText);
+                            candidate = fullText;
+                        } else {
+                            candidate = await getCleanText(
                                 logicPage,
                                 (Array.isArray(validator.result) ? validator.result : [validator.result]),
-                                { allowFallback: true } // Validation is critical, allow fallback
+                                { allowFallback: true }
                             );
-                        let candidate = current;
+                        }
                         if (validationId === 'claude') candidate = sanitizeClaudeOutput(candidate);
                         if (validationId === 'perplexity') candidate = sanitizePerplexityOutput(candidate);
                         if (validationId === 'gemini') candidate = sanitizeGeminiOutput(candidate, validationPrompt);
@@ -781,9 +992,10 @@ ${validationReport}
             lastError = error;
             if (attemptHeadless && headlessAttempts.length > 1) {
                 onProgress({ status: 'retry', message: '헤드리스 실행 실패. 브라우저를 표시 모드로 재시도합니다...' });
-                continue;
+                // continue to next iteration
+            } else {
+                throw error;
             }
-            throw error;
         } finally {
             try {
                 if (browserContext) await browserContext.close();
@@ -795,10 +1007,26 @@ ${validationReport}
     }
     throw lastError;
 }
-import NotionService from './notion_service.js';
 
 export async function saveToNotion(prompt, optimalAnswer, results) {
-    // Delegate to NotionService which already handles chunking and blocks
     const resp = await NotionService.saveAnalysis(prompt, optimalAnswer, results);
     return { success: true, url: `https://www.notion.so/${resp.id.replace(/-/g, '')}` };
+}
+
+export class PlaywrightHandler {
+    constructor(headless = BROWSER_HEADLESS) {
+        this.browser = null;
+        this.headless = headless;
+    }
+
+    async init() {
+    }
+
+    async run(prompt, strategy, onProgress, options) {
+        return await runExhaustiveAnalysis(prompt, onProgress, options);
+    }
+
+    async close() {
+        if (this.browser) await this.browser.close();
+    }
 }
