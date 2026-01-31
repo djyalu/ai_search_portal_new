@@ -184,3 +184,29 @@
   - **Gemini Sign-in Fix**: Fixed `isGeminiSignedOut` to detect "Sign in Gemini" signatures and implemented "Fail Fast" logic for session expiry.
   - **Error Status Refinement**: Prevented false positives in `agentStatus` (e.g. valid text containing "error" word).
 - **Status**: Completed
+### Phase 33: Performance & Stability Architecture (Hybrid Pipeline)
+- **Date**: 2026-02-01
+- **Action**: 
+  - **Architecture Overhaul**: Implemented "Load-Parallel, Send-Serial, Collect-Parallel" pipeline. 
+    - **Initial Load**: All agents launch and navigate in parallel (Latency absorption).
+    - **Dispatch**: Tabs are focused sequentially for atomic, verified sending (Focus safety).
+    - **Collection**: Results gathered in parallel (Concurrency: 4) for maximum speed.
+  - **Result**: Significant reduction in total cycle time while maintaining 0% send failure rate.
+- **Status**: Completed
+
+### Phase 34: Robust Input Verification (Traceable Send)
+- **Date**: 2026-02-01
+- **Action**: 
+  - **Triple Send Standard**: Applied "Click -> Paste -> Ctrl+Enter -> Enter" logic to **Perplexity** (replacing legacy fill) and all other agents.
+  - **Send Verification**: Implemented `checkGenerationStarted` to verify UI state (Stop button/User message) after sending.
+  - **Hybrid Retry Loop**: Automatic fallback to `Paste` if `Fill` fails, utilizing a 2-attempt verification loop.
+- **Status**: Completed
+
+### Phase 35: Intelligence Report v4.0 & Scoped Streaming
+- **Date**: 2026-02-01
+- **Action**: 
+  - **Streaming Fix**: Replaced global `document.body` observers with **Scoped Observers** targeting specific response containers (e.g., `[data-testid="conversation-turn"]`). Solved "Streaming but no text" issue.
+  - **Report Engine Upgrade**: Implemented `INTELLIGENCE-REPORT-FORMAT-UPGRADE.md`.
+    - **Structure**: Executive Summary, Agreement Matrix, Drivers-Mechanism-Impact Logic, Scenario Planning.
+    - **Tone**: McKinsey/Bain style consulting voice with strict confidence scoring.
+- **Status**: Completed
