@@ -154,4 +154,19 @@
 ### Phase 27: Functional Improvement Roadmap v3.0
 - **Date**: 2026-01-31
 - **Action**: Drafted `docs/IMPROVEMENT-PROPOSAL-V3.md`. Proposed Multi-turn context, Consensus scoring, and Semantic comparison view.
-- **Status**: Planning
+- **Status**: Completed
+
+### Phase 28: UI Redesign & Hybrid Theme Stabilization
+- **Date**: 2026-01-31
+- **Action**: Integrated "Sketch Dark" logo with a premium light theme content area. Optimized report typography with condensed line spacing and dark navy ink color for professional document feel.
+- **Status**: Completed
+
+### Phase 29: Agent Stability (ChatGPT/Claude) & Selector Refinement
+- **Date**: 2026-01-31
+- **Action**: Resolved Claude/ChatGPT streaming stalls by updating 'Stop' button detection and refining CSS selectors. Implemented `isClaudeSignedOut` for better session diagnostic.
+- **Status**: Completed
+
+### Phase 30: Strategic Report Engine (v3.5) & Visualization Logic
+- **Date**: 2026-01-31
+- **Action**: Enhanced Final Synthesis prompt to produce McKinsey-style strategic reports. Introduced support for executive summaries, core KPI highlighting, and structured scenario analysis.
+- **Status**: Completed

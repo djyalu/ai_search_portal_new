@@ -5,25 +5,25 @@
   --font-sans: "IBM Plex Sans KR", ui-sans-serif, system-ui, sans-serif;
   --font-display: "Space Grotesk", sans-serif;
 
-  --color-base-900: #1a1a1a;
-  --color-base-800: #2d2a28;
-  --color-base-300: #d8d1c8;
-  --color-base-200: #e6e0d8;
-  --color-base-100: #f5f2ed;
+  --color-base-950: #0a0a0a;
+  --color-base-900: #121212;
+  --color-base-800: #1a1a1a;
+  --color-base-300: #d1d5db;
+  --color-base-200: #e5e7eb;
+  --color-base-100: #f3f4f6;
   --color-base-50: #fffdf9;
 
-  --color-teal-accent: #00f5d4;
-  --color-amber-accent: #ffbe0b;
-  --color-coral-accent: #ff006e;
+  --color-sketch-white: rgba(255, 255, 255, 0.9);
+  --color-sketch-gray: rgba(255, 255, 255, 0.4);
 
-  --shadow-premium: 0 10px 40px -10px rgba(0, 0, 0, 0.15);
-  --shadow-glow: 0 0 25px rgba(0, 245, 212, 0.25);
+  --shadow-premium: 0 10px 40px -10px rgba(0, 0, 0, 0.5);
 }
 
 @layer base {
   body {
     @apply bg-base-50 text-base-900 font-sans antialiased;
-    background-image: radial-gradient(circle at 50% 50%, rgba(245, 242, 237, 0.5) 0%, rgba(255, 253, 249, 1) 100%);
+    background-image:
+      radial-gradient(circle at 50% 50%, #fffdf9 0%, #f4f1ea 100%);
   }
 
   /* Typography Scale Overrides */
@@ -40,7 +40,7 @@
   }
 
   .prose p {
-    @apply text-[16px] leading-[1.8] mb-6 text-base-900;
+    @apply text-[15px] leading-[1.5] mb-4 text-[#1f2a44] font-medium;
   }
 
   .prose strong {
@@ -74,6 +74,33 @@
 }
 
 @layer components {
+  .portal-shell {
+    @apply min-h-screen bg-base-50 p-4 md:p-8;
+  }
+
+  .portal-frame {
+    @apply max-w-7xl mx-auto space-y-8;
+  }
+
+  .black-header-card {
+    @apply bg-base-950 text-white p-6 md:p-8 relative overflow-hidden transition-all duration-700;
+    border: 2px solid var(--color-sketch-white);
+    border-radius: 255px 15px 225px 15px/15px 225px 15px 255px;
+  }
+
+  .search-input-container {
+    @apply bg-white/5 border-2 border-white/20 p-1.5 flex items-center transition-all focus-within:bg-white/10 focus-within:border-white/40 shadow-inner backdrop-blur-sm;
+    border-radius: 255px 15px 225px 15px/15px 225px 15px 255px;
+  }
+
+  .process-bar-container {
+    @apply mt-6 pt-6 border-t border-white/10 flex items-center justify-center gap-10 relative;
+  }
+
+  .process-track {
+    @apply absolute h-[1px] bg-white/20 left-[15%] right-[15%] top-[calc(50%-12px)] -z-0;
+  }
+
   .sidebar-nav-item {
     @apply flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 hover:bg-base-100 font-medium text-sm;
   }
@@ -83,7 +110,7 @@
   }
 
   .premium-card {
-    @apply bg-base-50 border border-base-100 rounded-[2rem] p-6 shadow-premium transition-all duration-300;
+    @apply bg-base-50 border border-base-100 rounded-[3rem] p-8 shadow-premium transition-all duration-300;
   }
 
   .premium-card:hover {
