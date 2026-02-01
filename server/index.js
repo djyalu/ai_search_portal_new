@@ -16,7 +16,7 @@ const LOG_PATH = path.join(process.cwd(), 'server.log');
 
 function log(...args) {
     const line = args.map(a => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
-    fs.appendFile(LOG_PATH, `${new Date().toISOString()} ` + line + '\n', (err) => { if (err) {/* ignore */} });
+    fs.appendFile(LOG_PATH, `${new Date().toISOString()} ` + line + '\n', (err) => { if (err) {/* ignore */ } });
     console.log(...args);
 }
 const httpServer = createServer(app);
@@ -108,34 +108,47 @@ app.post('/api/export/pdf', async (req, res) => {
         log('ERROR', error);
         res.status(500).json({ error: error.message || 'Failed to export PDF' });
     } finally {
-        try { if (browser) await browser.close(); } catch (_) {}
+        try { if (browser) await browser.close(); } catch (_) { }
     }
 });
+
+let isAnalyzing = false;
 
 io.on('connection', (socket) => {
     log('Client connected:', socket.id);
 
     socket.on('start-analysis', async (payload) => {
+        if (isAnalyzing) {
+            socket.emit('analysis-error', {
+                message: '현재 다른 분석이 진행 중입니다. 잠시 후 다시 시도해주세요.',
+                code: 'BUSY'
+            });
+            return;
+        }
+
         const { prompt, enabledAgents } = typeof payload === 'string' ? { prompt: payload } : (payload || {});
         if (!prompt || !prompt.trim()) {
             socket.emit('analysis-error', { message: '질문을 입력해주세요.' });
             return;
         }
+
+        isAnalyzing = true;
         log(`Starting analysis for: ${prompt}`);
-            try {
-                const results = await runExhaustiveAnalysis(prompt, (step) => {
-                    socket.emit('progress', step);
-                }, { enabledAgents });
+        try {
+            const results = await runExhaustiveAnalysis(prompt, (step) => {
+                socket.emit('progress', step);
+            }, { enabledAgents });
 
-                // 히스토리 저장
-                HistoryDB.save(prompt, results.results, results.summary);
+            // 히스토리 저장
+            HistoryDB.save(prompt, results.results, results.summary);
 
-                socket.emit('completed', results);
-            } catch (error) {
-                log('ERROR', error);
-                // use a namespaced event to avoid colliding with socket.io internal 'error'
-                socket.emit('analysis-error', { message: `Analysis failed: ${error.message}` });
-            }
+            socket.emit('completed', results);
+        } catch (error) {
+            log('ERROR', error);
+            socket.emit('analysis-error', { message: `분석 실패: ${error.message}` });
+        } finally {
+            isAnalyzing = false;
+        }
     });
 
     socket.on('disconnect', () => {

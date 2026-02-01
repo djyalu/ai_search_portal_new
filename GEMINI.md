@@ -282,3 +282,22 @@
   - **Early Termination**: Added `isFinalSentence` logic to `collectResult` to finish scraping as soon as a stable, complete answer is detected.
   - **Concurrency Boost**: Increased dispatch batch size to 4 for full parallel worker initialization.
 - **Status**: Completed
+
+### Phase 45: Accuracy & Logic Restore (v4.5)
+- **Date**: 2026-02-01
+- **Action**: 
+  - **Logic Phase Restore**: Re-implemented the Logic Phase (Cross-Validation) to provide consensus reporting.
+  - **Perplexity Tuning**: Adjusted `minLength` to 90 to improve success rate on concise answers.
+  - **Adaptive Retry**: Implemented a 6s "Deep Wait" retry for `short_output` errors to allow slower streaming agents to finish.
+  - **Verification Fixes**: Integrated user-applied fixes for `checkGenerationStarted` and `waitForNotGenerating`.
+- **Status**: Completed
+
+### Phase 46: Gap Closure & Full Stability (v4.8)
+- **Date**: 2026-02-01
+- **Action**: 
+  - **Concurrency Lock**: Implemented server-side `isAnalyzing` lock to prevent race conditions.
+  - **Dynamic minLength**: Response length requirements now scale with prompt complexity.
+  - **Fail-Fast Engine**: Added 10s null-text detection to quit stalled collection loops.
+  - **Claude Extraction v2**: Restricted scraping to assistant-role message blocks to eliminate UI noise.
+  - **Full Korean UX**: Standardized all remaining English labels and placeholders to Korean.
+- **Status**: Completed
