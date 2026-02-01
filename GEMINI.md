@@ -309,3 +309,12 @@
   - **Selective Blocking**: Unblocked fonts while keeping images/media blocked to improve UI stability.
   - **Sanitization Optimization**: Optimized scraping loop to skip redundant sanitization when text remains unchanged.
 - **Status**: Completed
+
+### Phase 48: Goal Alignment & Final Polish (v4.9.5)
+- **Date**: 2026-02-01
+- **Action**: 
+  - **Roadmap Alignment**: Verified and applied all stages from `GOAL-ALIGNED-IMPROVEMENT-ROADMAP.md`.
+  - **Remediation Plan Implementation**: Finalized Per-agent Fail-Fast (Gemini:4, others:5) and dynamic minLength (max 180).
+  - **Dispatch Optimization**: Implemented relaxed verification for Perplexity to speed up collection start.
+  - **Gemini Stability**: Refined `gemini_stopped` handling with a strict 2-attempt fail-fast limit.
+- **Status**: Completed
