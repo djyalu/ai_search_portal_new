@@ -864,6 +864,12 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
 
                         const checkGenerationStarted = async () => {
                             return await page.evaluate((wid) => {
+                                // C. Perplexity Dispatch Verification (Remediation Plan)
+                                if (wid === 'perplexity') {
+                                    const hasAnswer = !!document.querySelector('.prose,[data-testid="answer"],.result');
+                                    if (hasAnswer) return true;
+                                }
+
                                 const indicators = [
                                     'button[aria-label*="Stop"]', 'button[aria-label*="중단"]',
                                     'button[data-testid*="stop"]', '[aria-label="Stop generating"]',
@@ -1009,13 +1015,14 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
 
                         let lastText = "";
                         let stableCount = 0;
-                        let nullCounter = 0; // Fail-Fast counter (G2 Fix)
+                        let nullCounter = 0;
+                        let stoppedCount = 0; // D. Gemini Stopped Counter (Remediation Plan)
 
-                        // Dynamic minLength scaling (G2 Fix)
-                        const promptWeight = 0.2;
-                        const baseLen = worker.id === 'perplexity' ? 90 : 30;
-                        const minLength = Math.max(baseLen, Math.min(300, Math.floor(prompt.length * promptWeight)));
+                        // B. minLength Dynamic Scaling (Remediation Plan)
+                        const baseLen = worker.id === 'perplexity' ? 60 : 30;
+                        const minLength = Math.min(180, Math.max(baseLen, Math.floor(prompt.length * 0.2)));
 
+                        const NULL_STREAK_LIMIT = worker.id === 'gemini' ? 4 : 5; // A. Custom Fail-Fast (Remediation Plan)
                         const targetStableCount = (worker.id === 'gemini' || worker.id === 'claude') ? 4 : 3;
                         const maxIters = SERVICE_MAX_WAIT[worker.id] / 2000;
 
@@ -1033,13 +1040,14 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
                                 return stopSelectors.some(sel => !!document.querySelector(sel));
                             });
 
-                            // Extraction Logic
+                            // D. Gemini Stopped Handling (Remediation Plan)
                             if (worker.id === 'gemini') {
                                 if (await isGeminiStopped(page)) {
+                                    stoppedCount++;
+                                    if (stoppedCount >= 2) throw new Error('gemini_stopped');
                                     const resent = await resendGemini(page, worker);
                                     if (!resent) throw new Error('gemini_stopped');
                                     await delay(2000);
-                                    if (await isGeminiStopped(page)) throw new Error('gemini_stopped');
                                 }
                                 candidate = await getGeminiResponseText(page);
                             } else if (worker.id === 'claude') {
@@ -1089,9 +1097,9 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
                             const isFinalSentence = /[.!?](\s+)?$/.test(lastText.trim());
                             const isCompleteResponse = isCompleteEnough && isFinalSentence;
 
-                            // Fail-Fast: Too many null results while not generating
-                            if (nullCounter >= 5 && !isGenerating) {
-                                logInternal(`[Collect] Worker ${worker.id} Fail-Fast: No text for 10s and generation stopped.`);
+                            // A. Fail-Fast (Remediation Plan)
+                            if (nullCounter >= NULL_STREAK_LIMIT && !isGenerating) {
+                                logInternal(`[Collect] Worker ${worker.id} Fail-Fast: No text for 8-10s and generation stopped.`);
                                 break;
                             }
 
@@ -1115,11 +1123,15 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
 
                         if (retryCount < MAX_COLLECT_RETRIES && (errMsg === 'short_output' || errMsg === 'noisy_output')) {
                             retryCount++;
-                            // Longer delay for short_output to allow more streaming time
                             const waitNext = errMsg === 'short_output' ? 6000 : 3000;
                             logInternal(`[Collect] Retrying ${worker.id} in ${waitNext}ms due to ${errMsg}...`);
                             await delay(waitNext);
                             return await attemptCollection();
+                        }
+
+                        // F. Fail fast on session/send errors (Remediation Plan)
+                        if (errMsg === 'signed_out' || errMsg === 'send_failed' || errMsg === 'gemini_stopped') {
+                            retryCount = MAX_COLLECT_RETRIES; // Stop retries
                         }
 
                         // SNAPSHOT ON PERMANENT ERROR
