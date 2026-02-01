@@ -318,3 +318,12 @@
   - **Dispatch Optimization**: Implemented relaxed verification for Perplexity to speed up collection start.
   - **Gemini Stability**: Refined `gemini_stopped` handling with a strict 2-attempt fail-fast limit.
 - **Status**: Completed
+
+### Phase 49: Anti-Gravity Stability & Dispatch Tuning (v4.9.8)
+- **Date**: 2026-02-01
+- **Action**: 
+  - **Triple Send Strategy**: Implemented "Click -> Clear -> Paste -> Verify -> Send" chain for extreme input reliability.
+  - **Smart Dispatch**: Relaxed Perplexity verification to target response headers immediately, reducing start-up lag.
+  - **Auth Awareness**: Enhanced `isClaudeSignedOut` with "Waitlist" and "Google Login" detection patterns.
+  - **Noise Suppression**: Expanded Claude sanitization with 6+ new UI labels (Usage, Projects, Artifacts).
+- **Status**: Completed

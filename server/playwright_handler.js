@@ -140,7 +140,8 @@ function sanitizeClaudeOutput(text) {
         'new chat', 'search', 'chats', 'projects', 'artifacts', 'code', 'recents', 'hide',
         'all chats', 'history', 'recent', 'share', 'free plan', 'upgrade', 'account', 'settings',
         'subscribe', 'user', 'claude', 'claude.ai', 'anthropic', 'help', 'star', 'pinned',
-        'retry', 'copy', 'helpful', 'unhelpful', 'reply', 'usage limits', 'workspace', 'manage plan'
+        'retry', 'copy', 'helpful', 'unhelpful', 'reply', 'usage limits', 'workspace', 'manage plan',
+        'usage', 'projects', 'artifacts', 'get started', 'sign in', 'sign up'
     ]);
     const lines = cleaned.split('\n');
     const filtered = lines.filter((line) => {
@@ -331,10 +332,13 @@ async function isClaudeSignedOut(page) {
     try {
         return await page.evaluate(() => {
             const bodyText = document.body ? document.body.innerText || '' : '';
+            const hasLoginLink = !!document.querySelector('a[href*="/login"], a[href*="/register"], a[href*="/sign-in"]');
             return !!(
-                document.querySelector('a[href*="/login"], a[href*="/register"]') ||
+                hasLoginLink ||
                 bodyText.includes('Sign in to Claude') ||
-                bodyText.includes('Welcome back') && bodyText.includes('Email')
+                bodyText.includes('Welcome back') && bodyText.includes('Email') ||
+                bodyText.includes('Join our waitlist') ||
+                (bodyText.includes('Log in') && bodyText.includes('Continue with Google'))
             );
         });
     } catch (_) {
@@ -864,9 +868,9 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
 
                         const checkGenerationStarted = async () => {
                             return await page.evaluate((wid) => {
-                                // C. Perplexity Dispatch Verification (Remediation Plan)
+                                // C. Perplexity Dispatch Verification (Refined)
                                 if (wid === 'perplexity') {
-                                    const hasAnswer = !!document.querySelector('.prose,[data-testid="answer"],.result');
+                                    const hasAnswer = !!document.querySelector('.prose,[data-testid="answer"],.result,.markdown,article');
                                     if (hasAnswer) return true;
                                 }
 
@@ -902,11 +906,28 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
                                 const selectorTimeout = worker.id === 'perplexity' ? 12000 : 8000;
                                 await page.waitForSelector(sel, { timeout: selectorTimeout });
                                 await page.click(sel);
-                                await delay(300);
+                                await delay(200);
+                                // Clear existing if any
+                                await page.keyboard.press('Control+A');
+                                await page.keyboard.press('Backspace');
+                                await delay(100);
+
                                 try { await page.fill(sel, workerPrompt); } catch (_) { await pasteInput(page, workerPrompt); }
-                                await delay(500);
+
+                                // Verify input (Anti-Gravity Goal)
+                                const currentInput = await page.evaluate((s) => {
+                                    const el = document.querySelector(s);
+                                    return el ? (el.innerText || el.value || '').trim() : '';
+                                }, sel);
+
+                                if (currentInput.length < 5) {
+                                    // Try paste again if empty
+                                    await pasteInput(page, workerPrompt);
+                                }
+
+                                await delay(300);
                                 await page.keyboard.press('Control+Enter');
-                                await delay(500);
+                                await delay(300);
                                 await page.keyboard.press('Enter');
                                 await tryClickSend(page);
 
