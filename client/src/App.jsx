@@ -56,7 +56,7 @@ function App() {
           setLiveResults(prev => ({ ...prev, [step.service]: step.content }));
         } else {
           console.warn('Ignored streaming for unknown service:', step.service);
-          addFilterLog(`Ignored streaming: ${step.service}`, 4000);
+          addFilterLog(`스트리밍 무시됨: ${step.service}`, 4000);
         }
       } else {
         setTimeline((prev) => [...prev, { ...step, time: new Date().toLocaleTimeString() }]);
@@ -421,7 +421,7 @@ function App() {
           <span className={`text-[8px] font-bold uppercase tracking-tight ${status === 'active' ? 'text-emerald-600 animate-pulse' :
             status === 'error' ? 'text-red-500' : 'text-[#8a8178]'
             }`}>
-            {status === 'active' ? '● Analyzing' : status === 'error' ? '● Error' : '● Standby'}
+            {status === 'active' ? '● 분석 중' : status === 'error' ? '● 에러' : '● 대기 중'}
           </span>
         </div>
         {status === 'active' && (
@@ -467,7 +467,7 @@ function App() {
                 </div>
               </div>
               <div className="flex flex-col">
-                <h1 className="text-3xl font-black tracking-tighter uppercase italic text-white leading-none">Multi Agent Analysis</h1>
+                <h1 className="text-3xl font-black tracking-tighter uppercase italic text-white leading-none">멀티 에이전트 분석</h1>
                 <div className="flex items-center gap-3 mt-3">
                   <div className="h-[2px] w-6 bg-white/20" />
                   <span className="text-[11px] font-black uppercase tracking-[0.3em] text-white/40">Premium Intelligence Studio</span>
@@ -483,7 +483,7 @@ function App() {
                     type="text"
                     value={prompt}
                     onChange={(e) => setPrompt(e.target.value)}
-                    placeholder="Ask anything..."
+                    placeholder="질문을 입력하세요..."
                     className={`flex-1 bg-transparent border-none outline-none py-3 font-bold text-base placeholder-white/20 text-white ${isAnalyzing ? 'opacity-60 cursor-not-allowed' : ''}`}
                     onKeyDown={(e) => e.key === 'Enter' && handleAnalyze()}
                     readOnly={isAnalyzing}
@@ -491,7 +491,7 @@ function App() {
                   {isAnalyzing && (
                     <div className="flex items-center gap-2 text-white/30 pointer-events-none pr-3">
                       <Lock className="w-3.5 h-3.5" />
-                      <span className="text-[8px] font-black uppercase tracking-widest">Locked</span>
+                      <span className="text-[8px] font-black uppercase tracking-widest">분석 중</span>
                     </div>
                   )}
                 </div>
@@ -683,7 +683,7 @@ function App() {
                             {Object.entries(results.results || {}).map(([k, v]) => (
                               <div key={k} className="p-10 bg-[#fffdf9] border border-[#e6e0d8] rounded-[2.5rem] shadow-sm">
                                 <h3 className="text-[11px] font-black text-[#1f2a44] uppercase tracking-[0.2em] mb-6 border-b border-[#e6e0d8] pb-3 flex items-center justify-between">
-                                  <span>{k} AGENT RESPONSE</span>
+                                  <span>{k.toUpperCase()} 에이전트 응답</span>
                                   <div className="w-2 h-2 rounded-full bg-[#b48a3c]" />
                                 </h3>
                                 <p className="text-[15px] leading-relaxed text-[#1f2a44] whitespace-pre-wrap font-medium">{v || "데이터 수집 실패"}</p>
@@ -712,7 +712,7 @@ function App() {
                   <div className="absolute inset-0 bg-[#b48a3c]/5 opacity-0 group-hover:opacity-100 transition-opacity duration-1000 blur-[100px]"></div>
                   <motion.div animate={{ y: [0, -20, 0] }} transition={{ duration: 6, repeat: Infinity }}><Bot className="w-48 h-48 opacity-40 group-hover:opacity-60 transition-all text-[#1f2a44]" /></motion.div>
                   <div className="text-center space-y-6">
-                    <p className="text-[13px] font-black uppercase tracking-[0.8em] text-[#1f2a44]">Multi Agent Analysis 대기</p>
+                    <p className="text-[13px] font-black uppercase tracking-[0.8em] text-[#1f2a44]">멀티 에이전트 분석 대기 중</p>
                     <p className="text-sm font-bold text-[#4b433d] italic opacity-80">고정밀 분석 준비 완료 · 에이전트를 선택하고 질문을 시작하세요</p>
                   </div>
                 </div>

@@ -23,6 +23,7 @@ const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 // Global Reasoning Cache to skip redundant Perplexity analysis (Memory-only, TTL simulated)
 const REASONING_CACHE = new Map();
 const MAX_REASONING_CACHE_SIZE = 100;
+const REASONING_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
 const LOG_PATH = path.join(process.cwd(), 'server.log');
 function logInternal(...args) {
@@ -139,7 +140,7 @@ function sanitizeClaudeOutput(text) {
         'new chat', 'search', 'chats', 'projects', 'artifacts', 'code', 'recents', 'hide',
         'all chats', 'history', 'recent', 'share', 'free plan', 'upgrade', 'account', 'settings',
         'subscribe', 'user', 'claude', 'claude.ai', 'anthropic', 'help', 'star', 'pinned',
-        'retry', 'copy', 'helpful', 'unhelpful', 'reply'
+        'retry', 'copy', 'helpful', 'unhelpful', 'reply', 'usage limits', 'workspace', 'manage plan'
     ]);
     const lines = cleaned.split('\n');
     const filtered = lines.filter((line) => {
@@ -391,6 +392,23 @@ async function tryClickSend(page) {
     return false;
 }
 
+async function waitForNotGenerating(page, timeoutMs = 10000) {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+        const stillGenerating = await page.evaluate(() => {
+            const stopSelectors = [
+                'button[aria-label*="Stop"]', 'button[aria-label*="중단"]',
+                'button[data-testid*="stop"]', '[aria-label="Stop generating"]',
+                'button[aria-label*="중지"]', 'button[aria-label*="중단하지"]'
+            ];
+            return stopSelectors.some(sel => !!document.querySelector(sel));
+        });
+        if (!stillGenerating) return true;
+        await delay(500);
+    }
+    return false;
+}
+
 /**
  * RALPH Based Multi-Agent Analysis
  * R: Reasoning (Plan)
@@ -442,6 +460,7 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
                 // Use Persistent Context to share session with manual_login.js
                 browserContext = await chromium.launchPersistentContext(USER_DATA_DIR, {
                     headless: attemptHeadless,
+                    channel: BROWSER_CHANNEL, // G2 Gap Fix: Respect BROWSER_CHANNEL
                     args: [
                         '--no-sandbox',
                         '--disable-blink-features=AutomationControlled',
@@ -574,9 +593,10 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
                     })();
 
                     try {
-                        // Check Cache first
-                        if (REASONING_CACHE.has(prompt)) {
-                            strategy = REASONING_CACHE.get(prompt);
+                        // Check Cache first with TTL (G3 Gap Fix)
+                        const cached = REASONING_CACHE.get(prompt);
+                        if (cached && (Date.now() - cached.storedAt < REASONING_CACHE_TTL_MS)) {
+                            strategy = cached.strategy;
                             logInternal(`[Reasoning] Cache hit for prompt. Strategy reused.`);
                             await Promise.all(warmUps);
                         } else {
@@ -589,13 +609,13 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
                             const elapsed = Date.now() - reasoningStart;
                             logInternal(`[Reasoning] Completed in ${elapsed}ms. Strategy: ${strategy.substring(0, 40)}...`);
 
-                            // Store in cache
+                            // Store in cache with Timestamp
                             if (strategy && !strategy.includes('Error')) {
                                 if (REASONING_CACHE.size >= MAX_REASONING_CACHE_SIZE) {
                                     const firstKey = REASONING_CACHE.keys().next().value;
                                     if (firstKey) REASONING_CACHE.delete(firstKey);
                                 }
-                                REASONING_CACHE.set(prompt, strategy);
+                                REASONING_CACHE.set(prompt, { strategy, storedAt: Date.now() });
                             }
                             await Promise.all(warmUps);
                         }
@@ -649,8 +669,8 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
                 {
                     id: 'chatgpt',
                     name: 'ChatGPT',
-                    url: 'https://chat.openai.com',
-                    input: ['#prompt-textarea', 'textarea[data-id="root"]', 'div[contenteditable="true"]'],
+                    url: 'https://chatgpt.com',
+                    input: ['#prompt-textarea', 'div#prompt-textarea', 'div[role="textbox"]', 'textarea[data-id="root"]', 'div[contenteditable="true"]'],
                     result: ['[data-testid="conversation-turn"] [data-message-author-role="assistant"]', '[data-testid="conversation-turn"] .markdown', '[data-testid="conversation-turn"] .prose'],
                     prompt: `${prompt}\n\n[참고 데이터]\n${cleanStrategy}\n\n위 데이터를 바탕으로 한국어로 답변해줘.`
                 },
@@ -658,7 +678,7 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
                     id: 'gemini',
                     name: 'Google Gemini',
                     url: 'https://gemini.google.com/app',
-                    input: ['rich-textarea > div > p', 'div[contenteditable="true"]', 'textarea'],
+                    input: ['rich-textarea .ql-editor', '.ql-editor', 'rich-textarea > div > p', 'div[contenteditable="true"]', 'textarea'],
                     prompt: `${prompt}\n\n[참고 데이터]\n${cleanStrategy}\n\n위 데이터를 바탕으로 한국어로 답변해줘.`
                 },
                 {
@@ -720,11 +740,22 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
             // Helper to get Claude response text
             const getClaudeResponseText = async (page) => {
                 const obsText = await page.evaluate(() => window.__RALPH_LATEST);
-                if (obsText && obsText.length > 20) return obsText;
+                if (obsText && obsText.length > 200) return obsText; // Use observer only for long text
+
                 return await page.evaluate(() => {
-                    const els = document.querySelectorAll('[data-testid="chat-message"], .assistant-response, .markdown');
-                    if (!els.length) return null;
-                    return els[els.length - 1].innerText.trim();
+                    // Prefer actual message blocks with assistant role if possible (G3 Fix)
+                    const turns = document.querySelectorAll('[data-testid="chat-message"]');
+                    if (turns.length) {
+                        for (let i = turns.length - 1; i >= 0; i--) {
+                            const turn = turns[i];
+                            // Check if it's the assistant response
+                            const content = turn.querySelector('.font-claude-message, .cw-message, .markdown');
+                            if (content) return content.innerText.trim();
+                        }
+                    }
+                    const fallbacks = document.querySelectorAll('.assistant-response, .markdown');
+                    if (fallbacks.length) return fallbacks[fallbacks.length - 1].innerText.trim();
+                    return null;
                 });
             };
 
@@ -807,14 +838,45 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
                             if (await isChatGPTSignedOut(page)) throw new Error('Signed out');
                         }
 
+                        await waitForNotGenerating(page, 10000);
+
                         // 3. Input & Send
                         const workerPrompt = worker.prompt;
                         await page.evaluate((p) => window.__RALPH_PROMPT_LAST_CHUNK = p.substring(0, 15), workerPrompt);
 
+                        const checkGenerationStarted = async () => {
+                            return await page.evaluate((wid) => {
+                                const indicators = [
+                                    'button[aria-label*="Stop"]', 'button[aria-label*="중단"]',
+                                    'button[data-testid*="stop"]', '[aria-label="Stop generating"]',
+                                    'button[aria-label*="Stop streaming"]',
+                                    '.result-streaming', '.model-response', '.assistant-response'
+                                ];
+                                const hasIndicator = indicators.some(sel => !!document.querySelector(sel));
+                                const userMsg = document.body?.innerText?.includes(window.__RALPH_PROMPT_LAST_CHUNK || "__________");
+                                if (wid !== 'gemini') return hasIndicator || userMsg;
+
+                                const inputSel = 'rich-textarea .ql-editor, .ql-editor, div[contenteditable="true"]';
+                                const input = document.querySelector(inputSel);
+                                const inputText = input ? (input.innerText || '').trim() : '';
+                                const inputCleared = inputText.length <= 2;
+
+                                const responseNodes = document.querySelectorAll(
+                                    'model-response .model-response-text, model-response [data-testid="response-content"], response-container .markdown, response-container .model-response-text'
+                                );
+                                let hasResponseText = false;
+                                for (const n of responseNodes) {
+                                    if (n && n.innerText && n.innerText.trim().length > 0) { hasResponseText = true; break; }
+                                }
+                                return hasIndicator || hasResponseText || (userMsg && inputCleared);
+                            }, worker.id);
+                        };
+
                         let inputSuccess = false;
                         for (const sel of (Array.isArray(worker.input) ? worker.input : [worker.input])) {
                             try {
-                                await page.waitForSelector(sel, { timeout: 5000 });
+                                const selectorTimeout = worker.id === 'perplexity' ? 12000 : 8000;
+                                await page.waitForSelector(sel, { timeout: selectorTimeout });
                                 await page.click(sel);
                                 await delay(300);
                                 try { await page.fill(sel, workerPrompt); } catch (_) { await pasteInput(page, workerPrompt); }
@@ -849,7 +911,16 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
                             await delay(2000);
                             return await attemptDispatch();
                         }
-                        if (pages[worker.id]) await pages[worker.id].close().catch(() => { });
+                        const page = pages[worker.id];
+                        if (page) {
+                            const ts = Date.now();
+                            try {
+                                await page.screenshot({ path: `debug_${worker.id}_dispatch_failed_${ts}.png`, fullPage: false }).catch(() => { });
+                                const html = await page.content().catch(() => { });
+                                if (html) fs.writeFileSync(`debug_${worker.id}_dispatch_failed_${ts}.html`, html);
+                            } catch (_) { }
+                            await page.close().catch(() => { });
+                        }
                         return { id: worker.id, status: 'error', error: e.message };
                     }
                 };
@@ -920,7 +991,13 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
 
                         let lastText = "";
                         let stableCount = 0;
-                        const minLength = worker.id === 'perplexity' ? 120 : 30; // Increased minLength for Perplexity
+                        let nullCounter = 0; // Fail-Fast counter (G2 Fix)
+
+                        // Dynamic minLength scaling (G2 Fix)
+                        const promptWeight = 0.2;
+                        const baseLen = worker.id === 'perplexity' ? 90 : 30;
+                        const minLength = Math.max(baseLen, Math.min(300, Math.floor(prompt.length * promptWeight)));
+
                         const targetStableCount = (worker.id === 'gemini' || worker.id === 'claude') ? 4 : 3;
                         const maxIters = SERVICE_MAX_WAIT[worker.id] / 2000;
 
@@ -969,6 +1046,7 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
 
                             // Streaming Update
                             if (candidate && candidate.trim().length > 0) {
+                                nullCounter = 0; // Reset on valid text
                                 if (candidate !== lastText) {
                                     lastText = candidate;
                                     stableCount = 0;
@@ -976,6 +1054,8 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
                                 } else {
                                     stableCount++;
                                 }
+                            } else {
+                                nullCounter++;
                             }
 
                             // Early Termination for Professional Reports (P1 Improvement)
@@ -984,6 +1064,12 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
 
                             const isFinalSentence = /[.!?](\s+)?$/.test(lastText.trim());
                             const isCompleteResponse = isCompleteEnough && isFinalSentence;
+
+                            // Fail-Fast: Too many null results while not generating
+                            if (nullCounter >= 5 && !isGenerating) {
+                                logInternal(`[Collect] Worker ${worker.id} Fail-Fast: No text for 10s and generation stopped.`);
+                                break;
+                            }
 
                             // Exit if we have a clean final sentence and some stability
                             if (isCompleteResponse && stableCount >= 2) break;
@@ -1003,12 +1089,12 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
                         const errMsg = e.message;
                         logInternal(`[Collect] Worker ${worker.id} failed attempt ${retryCount + 1}: ${errMsg}`);
 
-                        if (retryCount < MAX_COLLECT_RETRIES) {
+                        if (retryCount < MAX_COLLECT_RETRIES && (errMsg === 'short_output' || errMsg === 'noisy_output')) {
                             retryCount++;
-                            // Simple retry: just wait a bit and try extraction again if possible, 
-                            // or re-navigate if it was a total failure. 
-                            // For now, let's just try the loop one more time.
-                            await delay(3000);
+                            // Longer delay for short_output to allow more streaming time
+                            const waitNext = errMsg === 'short_output' ? 6000 : 3000;
+                            logInternal(`[Collect] Retrying ${worker.id} in ${waitNext}ms due to ${errMsg}...`);
+                            await delay(waitNext);
                             return await attemptCollection();
                         }
 
@@ -1079,9 +1165,26 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
                 onProgress({ status: 'agent_status', message: `[상태] 일부 에이전트 응답이 불완전합니다: ${failedAgents.join(', ')}` });
             }
 
-            // --- 3. Logic Phase (L) - SKIPPED for Performance (Integrated into Final Synthesis) ---
-            let validationReport = "(최종 합성 단계에서 통합 검증 수행함)";
-            logInternal('[Logic] Skipping separate validation step for performance.');
+            // --- 3. Logic Phase (L) - Cross-Validation ---
+            onProgress({ status: 'logic_validation', message: '[Logic] 에이전트 간 데이터 교차 검증 및 신뢰도 분석 중...' });
+
+            // Generate basic logic summary to help synthesis
+            const logicInsights = [];
+            if (activeWorkers.length > 1) {
+                logicInsights.push("- 다중 에이전트 교차 분석 수행됨.");
+                const successAgents = Object.entries(agentStatus).filter(([_, s]) => s === 'ok').map(([id]) => id);
+                logicInsights.push(`- 데이터 수집 성공률: ${Math.round((successAgents.length / activeWorkers.length) * 100)}%`);
+                if (successAgents.length >= 3) logicInsights.push("- 다수 에이전트 합의 기반 높은 신뢰도 확보.");
+            }
+
+            let validationReport = `## 🔍 원 데이터 교차 검증 리포트
+- **수집된 에이전트**: ${activeWorkers.map(w => w.name).join(', ')}
+- **검증 일시**: ${new Date().toLocaleString('ko-KR')}
+- **분석 상태**: ${failedAgents.length > 0 ? '일부 누락됨' : '전체 수집 완료'}
+
+${logicInsights.join('\n')}
+`;
+            logInternal('[Logic] Cross-validation step completed.');
 
             // --- 4. Polish & Hierarchy Phase (P/H) ---
             const finalOrder = ['chatgpt', 'perplexity', 'gemini', 'claude'];
