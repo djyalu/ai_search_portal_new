@@ -259,23 +259,31 @@ function App() {
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Multi Agent Analysis</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
       :root { color-scheme: light; }
-      body { margin: 0; font-family: "Noto Sans KR", "Apple SD Gothic Neo", "Segoe UI", sans-serif; background: #fffdf9; color: #1f2a44; }
+      body { margin: 0; font-family: "IBM Plex Sans KR", "Noto Sans KR", "Apple SD Gothic Neo", "Segoe UI", sans-serif; background: #fffdf9; color: #1f2a44; }
       main { max-width: 980px; margin: 0 auto; padding: 48px 36px 64px; }
       .meta { background: #f4eee6; border: 1px solid #e6e0d8; border-radius: 18px; padding: 18px 20px; margin-bottom: 28px; }
       .meta .brand { font-weight: 900; letter-spacing: 0.08em; font-size: 12px; text-transform: uppercase; color: #6b635c; margin-bottom: 8px; }
       .meta .row { font-size: 12px; color: #6b635c; margin: 4px 0; }
-      h1, h2, h3 { font-weight: 900; letter-spacing: -0.03em; color: #1f2a44; }
-      p { line-height: 1.8; font-weight: 500; color: #4b433d; }
+      h1, h2, h3 { font-weight: 900; letter-spacing: -0.03em; color: #1f2a44; margin-bottom: 0.5em; }
+      h1 { font-size: 28px; margin-bottom: 1em; }
+      h2 { font-size: 20px; border-bottom: 1px solid #e6e0d8; padding-bottom: 8px; margin-top: 48px; }
+      h3 { font-size: 16px; margin-top: 32px; }
+      p { line-height: 1.8; font-weight: 500; color: #1f2a44; font-size: 14px; margin: 1em 0; }
       strong { color: #b48a3c; font-weight: 900; }
-      hr { border: 0; height: 1px; background: linear-gradient(to right, transparent, #b48a3c, transparent); margin: 32px 0; opacity: 0.4; }
-      table { width: 100%; border-collapse: collapse; margin: 18px 0; font-size: 14px; }
-      th, td { border: 1px solid #e6e0d8; padding: 8px 10px; vertical-align: top; }
-      th { background: #f4eee6; text-align: left; font-weight: 800; color: #1f2a44; }
-      td { color: #4b433d; }
+      hr { border: 0; height: 1px; background: #e6e0d8; margin: 48px 0; }
+      table { width: 100%; border-collapse: collapse; margin: 24px 0; font-size: 13px; border: 1px solid #e6e0d8; border-radius: 12px; overflow: hidden; }
+      th, td { border: 1px solid #e6e0d8; padding: 12px 14px; vertical-align: top; }
+      th { background: #f4eee6; text-align: left; font-weight: 900; color: #1f2a44; text-transform: uppercase; font-size: 11px; letter-spacing: 0.05em; }
+      td { color: #1f2a44; font-weight: 500; line-height: 1.6; }
+      tr:nth-child(even) { background: #fcfbf9; }
       code { background: #f4eee6; padding: 2px 6px; border-radius: 6px; font-size: 13px; }
-      pre { background: #f4eee6; padding: 16px; border-radius: 14px; overflow-x: auto; }
+      pre { background: #f4eee6; padding: 16px; border-radius: 14px; overflow-x: auto; font-size: 13px; }
+      .meta .brand { font-weight: 900; letter-spacing: 0.08em; font-size: 12px; text-transform: uppercase; color: #b48a3c; margin-bottom: 8px; }
     </style>
   </head>
   <body>

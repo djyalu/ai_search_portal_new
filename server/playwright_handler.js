@@ -4,6 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import NotionService from './notion_service.js';
+import { validateReport } from './report_validator.js';
 
 chromium.use(StealthPlugin());
 
@@ -18,6 +19,10 @@ const USER_DATA_BASE = process.env.USER_DATA_BASE || 'user_data_session';
 const USER_DATA_DIR = path.join(__dirname, `${USER_DATA_BASE}_${BROWSER_CHANNEL}`);
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+// Global Reasoning Cache to skip redundant Perplexity analysis (Memory-only, TTL simulated)
+const REASONING_CACHE = new Map();
+const MAX_REASONING_CACHE_SIZE = 100;
 
 const LOG_PATH = path.join(process.cwd(), 'server.log');
 function logInternal(...args) {
@@ -568,18 +573,40 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
                         return result;
                     })();
 
-                    // Race planning with a 12s total timeout after navigation (Snappy feed)
-                    strategy = await Promise.race([
-                        planningTask,
-                        new Promise((_, reject) => setTimeout(() => reject(new Error('Reasoning Timeout')), 12000))
-                    ]);
+                    try {
+                        // Check Cache first
+                        if (REASONING_CACHE.has(prompt)) {
+                            strategy = REASONING_CACHE.get(prompt);
+                            logInternal(`[Reasoning] Cache hit for prompt. Strategy reused.`);
+                            await Promise.all(warmUps);
+                        } else {
+                            // Race planning with a 10s total timeout after navigation (Snappy feed)
+                            strategy = await Promise.race([
+                                planningTask,
+                                new Promise((_, reject) => setTimeout(() => reject(new Error('Reasoning Timeout')), 10000))
+                            ]);
 
-                    const elapsed = Date.now() - reasoningStart;
-                    logInternal(`[Reasoning] Completed in ${elapsed}ms. Strategy: ${strategy.substring(0, 40)}...`);
-                    await Promise.all(warmUps);
-                } catch (err) {
-                    strategy = `기본 분석 모드 (Reasoning Status: ${err.message})`;
-                    logInternal(`[Reasoning] Failed or Timeout: ${err.message}. Cascading to default Agency.`);
+                            const elapsed = Date.now() - reasoningStart;
+                            logInternal(`[Reasoning] Completed in ${elapsed}ms. Strategy: ${strategy.substring(0, 40)}...`);
+
+                            // Store in cache
+                            if (strategy && !strategy.includes('Error')) {
+                                if (REASONING_CACHE.size >= MAX_REASONING_CACHE_SIZE) {
+                                    const firstKey = REASONING_CACHE.keys().next().value;
+                                    if (firstKey) REASONING_CACHE.delete(firstKey);
+                                }
+                                REASONING_CACHE.set(prompt, strategy);
+                            }
+                            await Promise.all(warmUps);
+                        }
+                    } catch (err) {
+                        strategy = `기본 분석 모드 (Reasoning Status: ${err.message})`;
+                        logInternal(`[Reasoning] Failed or Timeout: ${err.message}. Cascading to default Agency.`);
+                        await Promise.all(warmUps);
+                    }
+                } catch (generalReasoningError) {
+                    strategy = `기본 분석 모드 (Critical Reasoning Error: ${generalReasoningError.message})`;
+                    logInternal(`[Reasoning] Outer block failure: ${generalReasoningError.message}`);
                     await Promise.all(warmUps);
                 }
             }
@@ -850,7 +877,7 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
                 return Promise.all(results);
             };
 
-            const dispatchBatchResults = await runDispatchWithPool(activeWorkers, 3);
+            const dispatchBatchResults = await runDispatchWithPool(activeWorkers, 4);
             dispatchResults.push(...dispatchBatchResults);
 
             // 2. Collection Phase: Scrape results from open pages
@@ -951,13 +978,17 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
                                 }
                             }
 
-                            // Completion Condition
+                            // Early Termination for Professional Reports (P1 Improvement)
                             const isCompleteEnough = lastText.length >= minLength;
                             const isStable = stableCount >= targetStableCount;
 
-                            // Exit if stable and long enough, OR if not generating anymore and we have content
+                            const isFinalSentence = /[.!?](\s+)?$/.test(lastText.trim());
+                            const isCompleteResponse = isCompleteEnough && isFinalSentence;
+
+                            // Exit if we have a clean final sentence and some stability
+                            if (isCompleteResponse && stableCount >= 2) break;
                             if (isCompleteEnough && isStable) break;
-                            if (isCompleteEnough && !isGenerating && i > 5) break;
+                            if (isCompleteEnough && !isGenerating && i > 3) break; // Aggressive exit if not generating anymore
                         }
 
                         if (lastText.length < minLength) throw new Error('short_output');
@@ -1064,90 +1095,82 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
             onProgress({ status: 'polish_synthesis', message: `[정리] 최종 합성 진행 중 (${workerById[finalId].name})` });
             const finalPrompt = `질문: "${prompt}"
 
-[DATA ONLY]:
-에이전트 원문: ${JSON.stringify(rawData)}
-에이전트 상태: ${JSON.stringify(agentStatus)}
+[INPUT DATA]:
+- 에이전트 수집 원문: ${JSON.stringify(rawData)}
+- 에이전트 상태: ${JSON.stringify(agentStatus)}
 
-[QA RULES - 심사 및 품질 보증 원칙]:
-1. **[CONSENSUS RULES] 합의 및 신뢰도 등급**:
-   - **High (확실)**: 3개 이상의 에이전트가 공통적으로 주장하는 사실. (Executive Summary의 핵심 근거로 사용)
-   - **Medium (유력)**: 2개 에이전트가 일치하는 사실. (본문에 포함하되 '가능성이 있다'로 서술)
-   - **Low (불확실)**: 1개 에이전트만 주장하는 내용. (검증 필요 섹션으로 격리하거나 제외)
-   
-2. **[NUMERIC VALIDATION] 정량 근거 검증**:
-   - **수치/확률/비율**이 등장하면 반드시 제공된 원문 내에 출처가 존재하는지 확인하십시오.
-   - 출처가 불분명한 수치는 "추정"으로 표기하고 요약 본문(Executive Summary)에서 제외하십시오.
+[OBJECTIVE]:
+당신은 세계 최고 수준의 전략 컨설턴트(McKinsey/Bain & Company 스타일)입니다. 
+제공된 에이전트들의 원시 데이터를 분석하여, 실무진부터 경영진까지 즉시 활용 가능한 '종합 인텔리전스 보고서'를 작성하십시오.
+단순한 요약이 아닌, 데이터 간의 인과관계를 파헤치고 시나리오별 파급효과를 도출하는 것이 목적입니다.
 
-3. **[ANTI-HALLUCINATION] 지식 잠금**:
-   - 제공된 '원자료'에 없는 내용은 절대로 추가하지 마시오. 외부 지식/수치 사용 금지.
-   - 문맥상 필요한 보충 설명이라도 원문에 없으면 추가하지 마시오.
+[QA RULES - 절대 준수 원칙]:
+1. **[EVIDENCE HIERARCHY] 증거 계층 구조**:
+   - **High (확정)**: 3개 이상의 에이전트가 완벽히 일치하는 정보. 요약(Exec Summary)의 핵심 근거.
+   - **Medium (유력)**: 2개 에이전트가 일치. 본문 서술 시 '상당한 근거가 있음'으로 분류.
+   - **Low (불확실)**: 1개 에이전트만 주장. '개별 관점' 또는 '검증 필요' 섹션으로 처리.
+2. **[NUMERIC LOCK] 수치/사실 잠금**:
+   - 원문에 없는 수치, 날짜, 통계는 절대 창조하지 마십시오(Hallucination 방지).
+   - 확인되지 않은 수치는 반드시 "추정치" 또는 "에이전트 단독 주장"으로 명시하십시오.
+3. **[MECE ANALYSIS] 누락 및 중복 방지**:
+   - 분석은 상호 배타적이고 전체적으로 포괄적이어야 합니다.
+4. **[TONE & STYLE] 전문성**:
+   - 문장은 간결하고 단정적여야 합니다 (~임, ~함 등 명사형 종결 또는 단정한 평서문).
+   - 비유/미사여구 배격, 정량적/논리적 표현 지향.
 
-4. **[TONE & STYLE] 컨설팅 톤**:
-   - 문장은 간결하고 단정적 ("~임", "~함" 대신 완결된 문장 사용 권장).
-   - "가능할 수도 있다" 식의 모호한 표현 지양. 근거가 있으면 확언하고, 없으면 "불확실"로 명시.
+[REPORT STRUCTURE]:
 
-작성 규칙:
-- 한국어 작성, 보고서 구조 준수
-- 감성적 수식어 제거, 구조적 인과관계 중심 서술
-- 마크다운 섹션 헤더(#, ##)와 테이블(|) 형식을 엄격히 유지할 것
+# 📑 종합 인텔리전스 보고서: ${prompt}
 
-# 종합 인텔리전스 보고서: ${prompt}
+## 1. 분석 개요 (Metadata)
+- **분석 대상**: ${prompt}
+- **데이터 소스**: ${enabledAgentNames}
+- **분석 신뢰도**: [에이전트 간 합의 수준에 따라 High/Medium/Low 기재]
+- **핵심 키워드**: [데이터에서 도출된 핵심 키워드 3~5개]
 
-## 2.0 커버 & 메타
-- 분석 대상: (질문 키워드)
-- 데이터 출처: (활성 에이전트 목록)
-- 분석 신뢰도: (High/Med/Low - 합의 수준에 따라)
+## 2. Executive Summary (경영진 요약)
+- **핵심 결론 (3줄)**: 
+  1. (High Confidence 기반 가장 중요한 발견)
+  2. (진행 중인 핵심 트렌드)
+  3. (최종적 판단 결과)
+- **주요 리스크/기회**: (가장 시급히 대응해야 할 단기 변수)
+- **전략적 권고**: (이 상황에서 취해야 할 가장 합리적 포지션)
 
-## 2.1 Executive Summary (High confidence only)
-- 핵심 결론(3줄 요약): (3개 이상 에이전트가 합의한 핵심 통찰)
-- 주요 리스크: (핵심 불확실성/충돌 지점)
-- 권고 액션: (데이터 기반 최적의 다음 단계)
+## 3. 핵심 인사이트 및 합의 매트릭스
+| 구분 | 내용 (인사이트) | 근거 (에이전트) | 신뢰도 | 영향도 |
+|---|---|---|---|---|
+| 인사이트 1 | ... | ... | ... | ... |
+| 인사이트 2 | ... | ... | ... | ... |
 
-## 2.2 핵심 인사이트 Top 5
-| 인사이트 | 근거 요약 | 영향도(H/M/L) | 신뢰도(High/Med/Low) |
+## 4. 구조적 인과관계 분석 (Causal Chain)
+- **동인 (Drivers)**: (이 현상을 촉발하는 외부/내부 원인들)
+- **메커니즘 (Path)**: (원인들이 서로 얽혀 결과를 만들어내는 논리적 경로)
+- **파급효과 (Impact)**: (현재 및 단기적으로 나타날 구체적 현상)
+
+## 5. 시나리오 플래닝 (Scenario Planning)
+| 시나리오 | 발생 확률 | 트리거 (Trigger) | 핵심 결과 및 대응전략 |
 |---|---|---|---|
-| (인사이트1) | ... | ... | (합의 수준 기재) |
-| (인사이트2) | ... | ... | ... |
-...
+| **Optimistic (Bull)** | 고/중/저 | (어떤 조건이 충족될 때?) | ... |
+| **Baseline (Base)** | ... | (현재 흐름 유지 시) | ... |
+| **Pessimistic (Bear)** | ... | ... | ... |
 
-## 2.3 합의 vs 불일치 매트릭스
-(에이전트 간 관점 차이 분석)
-| 관점 | 합의 내용 (공통 의견) | 불일치/충돌 (관점 차이) |
-|---|---|---|
-| ... | ... | ... |
+## 6. 리스크 관리 및 미해결 과제
+- **데이터 공백 (Gaps)**: (에이전트들이 답변하지 못했거나 상충하는 지점)
+- **주요 가설 (Assumptions)**: (데이터 부족 시 우리가 전제한 논리)
+- **외부 교란 변수**: (분석 범위를 벗어나지만 주의가 필요한 요인)
 
-## 2.4 구조적 원인-경로-결과
-- **원인(Drivers)**: (결과를 만들어낸 핵심 동인)
-- **전개 메커니즘(Path)**: (원인이 결과로 이어지는 논리적 경로)
-- **최종 결과(Impact)**: (현재 관측되는 현상)
+## 7. 결론 및 모니터링
+- **최종 제언**: (분석 대상에 대한 총평)
+- **핵심 지표(KPI) 모니터링**:
+  - [ ] (KPI 1) - (확인 주기)
+  - [ ] (KPI 2) - ...
 
-## 2.5 시나리오 플래닝 (수치 근거 필수)
-| 시나리오 | 가능성 | 핵심 조건(Trigger) | 예상 파급효과 |
-|---|---|---|---|
-| 베이스(Base) | (Up/Down) | ... | ... |
-| 상승(Bull) | ... | ... | ... |
-| 하락(Bear) | ... | ... | ... |
-
-## 2.6 리스크 & 불확실성 & 가설
-- **데이터 공백**: (확인되지 않은 정보)
-- **추정 및 가설**: (근거가 부족하거나 Low 신뢰도인 주장들)
-- **외부 변수**: (통제 불가능한 요인)
-
-## 2.7 전략 옵션 & 권고 액션
-- **옵션 A (적극/공격)**: (기대효과 vs 리스크)
-- **옵션 B (중립/방어)**: ...
-- **권장 방향**: (결론적 제언)
-
-## 2.8 모니터링 체크리스트
-- [ ] (KPI 또는 관찰해야 할 지표 1) - (확인 주기)
-- [ ] (KPI 또는 관찰해야 할 지표 2) ...
-
-## 2.9 부록
-- 사용 에이전트 상세 상태: ${JSON.stringify(agentStatus)}
+## 부록 (Appendix)
+- **에이전트 수집 상태**: ${JSON.stringify(agentStatus)}
 `;
 
             // Reuse Page for Final Synthesis (Wait for page pool)
-            logInternal(`[Polish] Synthesis starting with agent: ${finalId}`);
+            logInternal(`[Polish] Synthesis starting with agent: ${finalId} `);
             let finalPage = globalPagePool[finalId];
             if (!finalPage || finalPage.isClosed()) {
                 finalPage = await browserContext.newPage();
@@ -1177,7 +1200,7 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
                         await delay(800);
                         await finalPage.keyboard.press('Enter');
                         await tryClickSend(finalPage);
-                        logInternal(`[Polish] Synthesis prompt sent to ${finalId}`);
+                        logInternal(`[Polish] Synthesis prompt sent to ${finalId} `);
                         break;
                     } catch (e) {
                         logInternal(`[Polish] Selector ${sel} failed for synthesis send.`);
@@ -1214,11 +1237,15 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
                 // await finalPage.close(); 
             }
 
+            const qualityCheck = validateReport(finalOutput);
+            logInternal(`[QA] Report Quality Score: ${qualityCheck.score}/100. Issues: ${qualityCheck.issues.length}`);
+
             return {
                 results: rawData,
-                validationReport: validationReport,
+                validationReport: validationReport + (qualityCheck.issues.length > 0 ? `\n\n**품질 검토 알림:**\n- ${qualityCheck.issues.join('\n- ')}` : "\n\n(구조 및 품질 검증 통과)"),
                 optimalAnswer: normalizeReport(finalOutput),
-                summary: normalizeReport(finalOutput)
+                summary: normalizeReport(finalOutput),
+                quality: qualityCheck
             };
 
         } catch (error) {

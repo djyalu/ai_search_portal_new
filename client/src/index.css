@@ -121,6 +121,60 @@
   .status-chip {
     @apply flex items-center gap-2 px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest border transition-all;
   }
+
+  /* Consulting Report Prose Overrides */
+  .prose {
+    --tw-prose-body: #1f2a44;
+    --tw-prose-headings: #1f2a44;
+    --tw-prose-links: #b48a3c;
+    --tw-prose-bold: #1f2a44;
+    --tw-prose-bullets: #b48a3c;
+    --tw-prose-hr: #e6e0d8;
+    --tw-prose-th-borders: #e6e0d8;
+    --tw-prose-td-borders: #e6e0d8;
+    font-size: 0.925rem;
+    line-height: 1.7;
+  }
+
+  .prose h1 {
+    @apply text-3xl font-black tracking-tighter mb-8 mt-12;
+  }
+
+  .prose h2 {
+    @apply text-xl font-black tracking-tight mb-6 mt-10 border-b border-[#e6e0d8] pb-4;
+  }
+
+  .prose h3 {
+    @apply text-lg font-black tracking-tight mb-4 mt-8;
+  }
+
+  .prose table {
+    @apply w-full border-collapse my-8 rounded-2xl overflow-hidden border border-[#e6e0d8];
+  }
+
+  .prose thead {
+    @apply bg-[#f4eee6] border-b-2 border-[#e6e0d8];
+  }
+
+  .prose th {
+    @apply px-4 py-3 text-left text-[11px] font-black uppercase tracking-widest text-[#8a8178];
+  }
+
+  .prose td {
+    @apply px-4 py-3 text-[13px] border-b border-[#e6e0d8]/50 font-medium align-top;
+  }
+
+  .prose tr:last-child td {
+    @apply border-b-0;
+  }
+
+  .prose tr:nth-child(even) {
+    @apply bg-[#f4eee6]/20;
+  }
+
+  .prose strong {
+    @apply text-[#b48a3c] font-black;
+  }
 }
 
 /* Custom Scrollbar */
