@@ -55,42 +55,119 @@ async function getCleanText(page, selectors, options = {}) {
     }, { sels: selectors, allowFallbackIn: allowFallback });
 }
 
+// Shared Noise Stripper Logic
+const GLOBAL_STOP_PHRASES = [
+    'sign in', 'upgrade', 'tools', 'cookie preferences', 'see plans',
+    'keep chatting', 'you are out of free messages', 'share', 'related', 'sources',
+    'make this response better', 'regenerate', 'was this helpful', 'bad response',
+    'copy code', 'view sources', 'learn more',
+    'about gemini', 'gemini app', 'subscriptions', 'for business', 'once you\'re signed in',
+    'recents', 'hide', 'free plan', 'what can i help you with today?',
+    'you said', 'chatgpt said', 'assistant', 'system', 'model', 'tools',
+    'ask a follow-up', 'show more', 'answer', 'links', 'images', 'install',
+    'history', 'discover', 'spaces', 'finance', 'travel', 'academic', 'more'
+];
+
+function sanitizeCommonNoise(text) {
+    if (!text) return text;
+    return text.split('\n').filter(line => {
+        const l = line.trim().toLowerCase();
+        if (!l) return true;
+        // Exact match or contains if short enough to be a UI label
+        if (GLOBAL_STOP_PHRASES.some(p => l === p || (l.length < 60 && l.includes(p)))) return false;
+        return true;
+    }).join('\n').trim();
+}
+
+function countNoiseHits(text) {
+    if (!text) return 0;
+    const lower = text.toLowerCase();
+    const tokens = [
+        'about gemini', 'gemini app', 'subscriptions', 'for business', 'once you\'re signed in',
+        'recents', 'hide', 'free plan', 'what can i help you with today', 'upgrade', 'tools',
+        'ask a follow-up', 'show more', 'answer', 'links', 'images', 'install',
+        'history', 'discover', 'spaces', 'finance', 'travel', 'academic', 'more',
+        'cookie preferences', 'view sources'
+    ];
+    let hits = 0;
+    for (const t of tokens) if (lower.includes(t)) hits++;
+    return hits;
+}
+
+function looksLikeUiNoise(text) {
+    if (!text) return true;
+    const hits = countNoiseHits(text);
+    if (hits >= 4) return true;
+    const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+    const shortLines = lines.filter(l => l.length <= 20).length;
+    if (lines.length > 10 && shortLines / lines.length > 0.7) return true;
+    return false;
+}
+
+function normalizeReport(text) {
+    if (!text) return text;
+    let cleaned = text
+        .replace(/\r\n/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .replace(/[ \t]+\n/g, '\n')
+        .trim();
+
+    // Flexible strip prompt echoes and preambles
+    // Pattern: Look for start of document or preamble, then non-greedy match until the first major report header.
+    // This handles "Sure! Here is the report..." or "You said: ... ChatGPT said: ..."
+    const reportHeaders = ['# 종합 인텔리전스 보고서', '## 2\\.0 커버 & 메타', '종합 인텔리전스 보고서'];
+    const headerPattern = reportHeaders.join('|');
+    const echoRegex = new RegExp(`^[\\s\\S]*?(${headerPattern})`, 'i');
+
+    cleaned = cleaned.replace(echoRegex, '$1');
+
+    // Strip boilerplate tails
+    cleaned = cleaned.replace(/(ChatGPT can make mistakes|See Cookie Preferences|Was this helpful|Bad response)[\s\S]*$/i, '').trim();
+
+    return cleaned;
+}
+
 function sanitizeClaudeOutput(text) {
     if (!text) return text;
-    const lines = text.split('\n');
+    let cleaned = sanitizeCommonNoise(text);
     const stopLabels = new Set([
         'new chat', 'search', 'chats', 'projects', 'artifacts', 'code', 'recents', 'hide',
         'all chats', 'history', 'recent', 'share', 'free plan', 'upgrade', 'account', 'settings',
         'subscribe', 'user', 'claude', 'claude.ai', 'anthropic', 'help', 'star', 'pinned',
-        'retry', 'copy', 'helpful', 'unhelpful'
+        'retry', 'copy', 'helpful', 'unhelpful', 'reply'
     ]);
+    const lines = cleaned.split('\n');
     const filtered = lines.filter((line) => {
         const l = line.trim();
         if (!l) return true;
-        if (l.length > 50) return true; // unlikely to be a UI label
+        if (l.length > 60) return true; // unlikely to be a UI label
         const lower = l.toLowerCase();
         if (stopLabels.has(lower)) return false;
-        if (lower.includes('search results')) return false;
+        if (lower.startsWith('search results')) return false;
         if (lower === 'sources' || lower.startsWith('sources ') || lower.startsWith('source ')) return false;
         return true;
     });
-    const cleaned = filtered.join('\n').replace(/\n{3,}/g, '\n\n').trim();
-    return cleaned.length > 0 ? cleaned : text;
+    return filtered.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
 function sanitizePerplexityOutput(text) {
     if (!text) return text;
+    let cleaned = sanitizeCommonNoise(text);
     const stopLabels = new Set([
         'history', 'recent', 'discover', 'spaces', 'finance', 'travel', 'academic', 'more',
         'account', 'upgrade', 'install', 'answer', 'links', 'images', 'ask a follow-up',
-        'search', 'searching', 'reviewing sources', 'thinking', 'powered by'
+        'search', 'searching', 'reviewing sources', 'thinking', 'powered by', 'related',
+        'share', 'rewrite', 'copy'
     ]);
-    const lines = text.split('\n');
+    const lines = cleaned.split('\n');
     const filtered = lines.filter((line) => {
         const l = line.trim();
         if (!l) return true;
+
         const lower = l.toLowerCase();
         if (stopLabels.has(lower)) return false;
+
+        // Perplexity specific noise
         if (lower.startsWith('searching')) return false;
         if (lower.startsWith('reviewing sources')) return false;
         if (lower.startsWith('sources')) return false;
@@ -98,43 +175,50 @@ function sanitizePerplexityOutput(text) {
         if (lower.startsWith('images')) return false;
         if (lower.startsWith('ask a follow-up')) return false;
         if (lower.startsWith('powered by')) return false;
+        if (lower.includes('reddit+1')) return false;
+
         // strip pure domain lines / source list items
         if (/(^|\s)([a-z0-9-]+\.)+(com|net|org|ai|io|co|kr|us|uk|edu|gov|jp|cn|de)(\b|\/)/i.test(l)) return false;
         return true;
     });
-    const cleaned = filtered.join('\n').replace(/\n{3,}/g, '\n\n').trim();
-    return cleaned.length > 0 ? cleaned : text;
+    return filtered.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
 function sanitizeGeminiOutput(text, promptText = '') {
     if (!text) return text;
+    let cleaned = sanitizeCommonNoise(text);
+
+    // Remove Prompt Echo if present
     const promptLines = promptText
         ? promptText.split('\n').map(line => line.trim()).filter(Boolean)
         : [];
     const promptSet = new Set(promptLines);
-    const lines = text.split('\n');
+
+    const lines = cleaned.split('\n');
     const stopLabels = new Set([
         'gemini', 'conversation with gemini', 'fast', 'pro', 'your privacy', 'opens in a new window',
-        'gemini can make mistakes', 'your privacy & gemini', 'feedback', 'report', 'share', 'view sources'
+        'gemini can make mistakes', 'your privacy & gemini', 'feedback', 'report', 'share', 'view sources',
+        'show drafts', 'regenerate drafts', 'volume_up', 'thumb_up', 'thumb_down', 'more_vert'
     ]);
     const stopExact = new Set(['한국어로 답변해줘.', '한국어로 답변해줘']);
+
     const filtered = lines.filter((line) => {
         const l = line.trim();
         if (!l) return true;
         const lower = l.toLowerCase();
         if (stopLabels.has(lower)) return false;
-        // Only strip if exactly matching a prompt line to avoid stripping partial matches in content
         if (promptSet.has(l)) return false;
         if (stopExact.has(l)) return false;
         if (lower.includes('gemini can make mistakes')) return false;
         if (lower.includes('opens in a new window')) return false;
+        if (l === 'list' || l === 'edit') return false; // Gemini UI icons
         return true;
     });
-    const cleaned = filtered.join('\n').replace(/\n{3,}/g, '\n\n').trim();
-    if (!cleaned) return null;
-    // Lower minLength to 12 as per analysis to allow short but valid responses
-    if (cleaned.length < 12) return cleaned;
-    return cleaned;
+
+    const result = filtered.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+    if (!result) return null;
+    if (result.length < 12) return result;
+    return result;
 }
 
 async function getGeminiResponseText(page) {
@@ -148,7 +232,7 @@ async function getGeminiResponseText(page) {
                 let text = '';
 
                 // 1. Check current node (if it's a known response container)
-                if (root.matches && (root.matches('[data-testid="response-content"]') || root.matches('.markdown'))) {
+                if (root.matches && (root.matches('[data-testid="response-content"]') || root.matches('.markdown') || root.matches('.model-response-text'))) {
                     return readText(root);
                 }
 
@@ -166,7 +250,7 @@ async function getGeminiResponseText(page) {
 
                 // 4. Fallback search for specific selectors if no text yet
                 if (!text) {
-                    const inner = root.querySelector?.('[data-testid="response-content"], .markdown, .assistant-response, .message-content');
+                    const inner = root.querySelector?.('[data-testid="response-content"], .markdown, .model-response-text, .assistant-response, .message-content');
                     if (inner) text = readText(inner);
                 }
 
@@ -182,7 +266,7 @@ async function getGeminiResponseText(page) {
             }
 
             // Global Fallback
-            const fallbackSels = ['[data-testid="response-content"]', 'model-response .markdown', '.assistant-response', 'article'];
+            const fallbackSels = ['[data-testid="response-content"]', 'model-response .markdown', 'model-response .model-response-text', 'response-container .model-response-text', 'response-container .markdown', '.model-response-text', '.assistant-response', 'article'];
             for (const sel of fallbackSels) {
                 const els = document.querySelectorAll(sel);
                 if (els.length) {
@@ -272,7 +356,8 @@ async function tryClickSend(page) {
     const isGenerating = await page.evaluate(() => {
         const stopSelectors = [
             'button[aria-label*="Stop"]', 'button[aria-label*="중단"]',
-            'button[data-testid*="stop"]', '[aria-label="Stop generating"]'
+            'button[data-testid*="stop"]', '[aria-label="Stop generating"]',
+            'button[aria-label*="중지"]', 'button[aria-label*="중단하지"]'
         ];
         return stopSelectors.some(sel => !!document.querySelector(sel));
     });
@@ -281,13 +366,15 @@ async function tryClickSend(page) {
     const sendSelectors = [
         'button[aria-label*="Send"]:not([aria-label*="Stop"])',
         'button[aria-label*="전송"]:not([aria-label*="중단"])',
+        'button[aria-label*="메시지"]',
         'button[data-testid*="send"]',
         'button[data-testid*="submit"]',
         'button[aria-label="Send message"]',
         'button[data-testid="send-button"]',
         'button[aria-label="Submit"]',
         '.send-button',
-        'button.send'
+        'button.send',
+        'button.submit'
     ];
     for (const sendSel of sendSelectors) {
         const btn = await page.$(sendSel);
@@ -307,6 +394,10 @@ async function tryClickSend(page) {
  * P: Polish (Synthesize)
  * H: Hierarchy (Manage)
  */
+// Global Context for Reuse (Performance Breakthrough)
+let globalContext = null;
+const globalPagePool = {};
+
 export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
     const enabledAgents = {
         perplexity: true,
@@ -315,32 +406,64 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
         claude: true,
         ...(options?.enabledAgents || {})
     };
+
+    // Performance: Reuse global context if available and healthy
+    if (globalContext) {
+        try {
+            // Simple check if alive
+            if (globalContext.pages().length >= 0) {
+                logInternal('[Performance] Reusing existing global browser context.');
+            } else {
+                globalContext = null; // Reset if invalid
+            }
+        } catch (e) { globalContext = null; }
+    }
+
     const headlessAttempts = BROWSER_HEADLESS ? [true, false] : [false];
     let lastError;
-    for (const attemptHeadless of headlessAttempts) {
-        let browserContext;
-        let browser = null;
-        try {
-            logInternal(`RALPH 에이전시 파이프라인 가동... Prompt: ${prompt.substring(0, 30)}`);
-            onProgress({ status: 'hierarchy_init', message: '[Hierarchy] RALPH 에이전시 파이프라인 가동...' });
 
-            // Use Persistent Context to share session with manual_login.js
-            browserContext = await chromium.launchPersistentContext(USER_DATA_DIR, {
-                headless: attemptHeadless,
-                // Ensure same args as manual login to match session fingerprint
-                args: [
-                    '--no-sandbox',
-                    '--disable-blink-features=AutomationControlled',
-                    '--disable-infobars',
-                    '--window-size=1920,1080',
-                    '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
-                ],
-                slowMo: BROWSER_SLOWMO,
-                permissions: ['clipboard-read', 'clipboard-write'],
-                viewport: { width: 1920, height: 1080 }
-            });
-            // browser object is bound to context in persistent mode
-            browser = browserContext;
+    // Attempt logic only if globalContext is missing
+    const attempts = globalContext ? [true] : headlessAttempts; // If reuse, just run logic
+
+    for (const attemptHeadless of attempts) {
+        let browserContext = globalContext;
+        let isReused = !!globalContext;
+
+        try {
+            if (!browserContext) {
+                logInternal(`RALPH 에이전시 파이프라인 가동... (New Session)`);
+                onProgress({ status: 'hierarchy_init', message: '[Hierarchy] 엔진 초기화 및 가속 모드 가동...' });
+
+                // Use Persistent Context to share session with manual_login.js
+                browserContext = await chromium.launchPersistentContext(USER_DATA_DIR, {
+                    headless: attemptHeadless,
+                    args: [
+                        '--no-sandbox',
+                        '--disable-blink-features=AutomationControlled',
+                        '--disable-infobars',
+                        '--window-size=1920,1080',
+                        '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
+                    ],
+                    slowMo: BROWSER_SLOWMO,
+                    permissions: ['clipboard-read', 'clipboard-write'],
+                    viewport: { width: 1920, height: 1080 }
+                });
+
+                // RESOURCE BLOCKING (Perf Boost)
+                await browserContext.route('**/*', (route) => {
+                    const type = route.request().resourceType();
+                    // Block images, fonts, media to prioritize text
+                    if (['image', 'font', 'media'].includes(type)) {
+                        return route.abort();
+                    }
+                    return route.continue();
+                });
+
+                globalContext = browserContext; // Save globally
+            } else {
+                logInternal(`RALPH 에이전시 파이프라인 가동... (Hot-Start)`);
+                onProgress({ status: 'hierarchy_init', message: '[Hierarchy] 핫-스타트(Hot-Start) 가속 처리 중...' });
+            }
 
             // New Helper: Paste Input to bypass React State issues
             const pasteInput = async (page, text) => {
@@ -353,6 +476,7 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
                 if (id === 'chatgpt') return '[data-testid="conversation-turn"]'; // Will target last one logic inside
                 if (id === 'claude') return '[data-testid="chat-message"], .assistant-response';
                 if (id === 'gemini') return 'model-response, [data-testid="response-content"]';
+                if (id === 'perplexity') return '.prose, [data-testid="answer"], .result, .message-content, main article';
                 return 'body';
             };
 
@@ -389,6 +513,18 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
                 } catch (e) { /* Check specific error */ }
             };
 
+            // --- Pre-warm Phase (Internal) ---
+            // Start opening tabs while we reason
+            const warmUps = Object.entries(enabledAgents)
+                .filter(([id, enabled]) => enabled && id !== 'perplexity') // Perplexity warmed below or via Reasoning
+                .map(async ([id]) => {
+                    try {
+                        const p = await browserContext.newPage();
+                        globalPagePool[id] = p;
+                        await p.goto(workerById[id].url, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => { });
+                    } catch (e) { }
+                });
+
             // --- 1. Reasoning Phase (R) ---
             logInternal(`Reasoning Phase 시작. Prompt sent to Perplexity...`);
             onProgress({ status: 'reasoning', message: '[Reasoning] 질의 의도 분석 및 에이전트 작업 설계 중...' });
@@ -397,8 +533,13 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
             let strategy = "Perplexity 비활성화로 계획 생략";
             if (!enabledAgents.perplexity) {
                 strategy = "Perplexity 비활성화로 계획 생략";
+                await Promise.all(warmUps); // Finish other warmups
             } else {
-                const planningPage = await browserContext.newPage();
+                let planningPage = globalPagePool['perplexity'];
+                if (!planningPage || planningPage.isClosed()) {
+                    planningPage = await browserContext.newPage();
+                    globalPagePool['perplexity'] = planningPage;
+                }
                 strategy = "기본 분석 모드";
                 try {
                     await planningPage.goto('https://www.perplexity.ai/', { waitUntil: 'domcontentloaded', timeout: 60000 });
@@ -429,10 +570,12 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
                     await delay(5000);
                     strategy = await getCleanText(planningPage, ['.prose', '.result', '.message-content']) || "기본 전략 가동";
                     logInternal(`Reasoning 완료. Strategy: ${strategy.substring(0, 50)}...`);
+                    await Promise.all(warmUps); // Finish other warmups during reasoning
                 } catch (err) {
                     // keep going but log planning error
                     strategy = `에러 발생: ${err.message}`;
-                } finally { await planningPage.close(); }
+                }
+                // Do NOT close Perplexity page - keep for agency reuse
             }
 
             // --- 2. Agency Phase (A) ---
@@ -454,16 +597,20 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
 
             // Sanitize strategy to prevent poisoning other agents
             let cleanStrategy = strategy || "";
-            if (cleanStrategy.startsWith('Error') || cleanStrategy.startsWith('에러')) {
-                cleanStrategy = "(이전 단계 분석 데이터 없음)";
+            if (cleanStrategy.startsWith('Error') || cleanStrategy.startsWith('??????')) {
+                cleanStrategy = "(?????? ?????? ?????? ????????? ??????)";
             }
-
-            const workers = [
+            cleanStrategy = sanitizeCommonNoise(cleanStrategy);
+            if (cleanStrategy.length > 1200) {
+                cleanStrategy = cleanStrategy.substring(0, 1200);
+            }
+const workers = [
                 {
                     id: 'perplexity',
                     name: 'Perplexity',
                     url: 'https://www.perplexity.ai',
                     input: ['textarea[placeholder*="Ask"]', 'textarea[placeholder*="Where"]', 'textarea[placeholder*="Follow"]', 'textarea', 'div[contenteditable="true"]'],
+                    result: ['.prose', '[data-testid="answer"]', '.result', '.message-content', 'main article'],
                     prompt: `${prompt}\n\nRules:\n- 한국어로만 답변\n- 답변만 출력\n- 링크/출처 목록 금지\n- 간결하고 구조적으로 작성`
                 },
                 {
@@ -471,6 +618,7 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
                     name: 'ChatGPT',
                     url: 'https://chat.openai.com',
                     input: ['#prompt-textarea', 'textarea[data-id="root"]', 'div[contenteditable="true"]'],
+                    result: ['[data-testid="conversation-turn"] [data-message-author-role="assistant"]', '[data-testid="conversation-turn"] .markdown', '[data-testid="conversation-turn"] .prose'],
                     prompt: `${prompt}\n\n[참고 데이터]\n${cleanStrategy}\n\n위 데이터를 바탕으로 한국어로 답변해줘.`
                 },
                 {
@@ -494,30 +642,135 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
             const activeWorkers = workers.filter(w => enabledAgents[w.id]);
 
 
-            // Helper to get Gemini response text using the observer
-            const getGeminiResponseText = async (page) => {
-                return await page.evaluate(() => window.__RALPH_LATEST || document.body.innerText);
+            // Helper: Get ChatGPT response text
+            const getChatGPTResponseText = async (page) => {
+                return await page.evaluate(() => {
+                    const turns = document.querySelectorAll('[data-testid="conversation-turn"]');
+                    if (turns.length) {
+                        const last = turns[turns.length - 1];
+                        const assistant = last.querySelector('[data-message-author-role="assistant"], .markdown, .prose');
+                        if (assistant) return assistant.innerText.trim();
+                        return last.innerText.trim();
+                    }
+                    const assistants = document.querySelectorAll('[data-message-author-role="assistant"]');
+                    if (assistants.length) return assistants[assistants.length - 1].innerText.trim();
+                    const fallback = document.querySelector('.markdown, .prose');
+                    return fallback ? fallback.innerText.trim() : null;
+                });
             };
 
-            // Helper to get Claude response text using the observer
+            // Helper to get Gemini response text (Hybrid: Observer + Fallback)
+            const getGeminiResponseText = async (page) => {
+                const obsText = await page.evaluate(() => window.__RALPH_LATEST);
+                if (obsText && obsText.length > 50) return obsText;
+
+                // Fallback to deep traversal
+                return await page.evaluate(() => {
+                    const readText = (node) => node && node.innerText ? node.innerText.trim() : '';
+                    const findTextDeep = (root) => {
+                        if (!root) return '';
+                        let text = '';
+                        if (root.matches && (root.matches('[data-testid="response-content"]') || root.matches('.markdown') || root.matches('.model-response-text'))) return readText(root);
+                        if (root.shadowRoot) text += findTextDeep(root.shadowRoot);
+                        for (const child of Array.from(root.children || [])) {
+                            const childText = findTextDeep(child);
+                            if (childText) text += (text ? '\n' : '') + childText;
+                        }
+                        return text.trim();
+                    };
+                    const responses = Array.from(document.querySelectorAll('model-response'));
+                    if (responses.length) return findTextDeep(responses[responses.length - 1]);
+                    return readText(document.querySelector('[data-testid="response-content"]'));
+                });
+            };
+
+            // Helper to get Claude response text
             const getClaudeResponseText = async (page) => {
-                return await page.evaluate(() => window.__RALPH_LATEST || document.body.innerText);
+                const obsText = await page.evaluate(() => window.__RALPH_LATEST);
+                if (obsText && obsText.length > 20) return obsText;
+                return await page.evaluate(() => {
+                    const els = document.querySelectorAll('[data-testid="chat-message"], .assistant-response, .markdown');
+                    if (!els.length) return null;
+                    return els[els.length - 1].innerText.trim();
+                });
+            };
+
+            const isGeminiStopped = async (page) => {
+                return await page.evaluate(() => {
+                    const bodyText = document.body?.innerText || '';
+                    return bodyText.includes('????????? ?????????????????????') || bodyText.includes('Response generation stopped');
+                });
+            };
+
+            const resendGemini = async (page, worker) => {
+                for (const sel of (Array.isArray(worker.input) ? worker.input : [worker.input])) {
+                    try {
+                        await page.waitForSelector(sel, { timeout: 3000 });
+                        await page.click(sel);
+                        await delay(200);
+                        await page.keyboard.press('Control+A');
+                        await page.keyboard.press('Backspace');
+                        try { await page.fill(sel, worker.prompt); } catch (_) {
+                            await pasteInput(page, worker.prompt);
+                        }
+                        await delay(300);
+                        await page.keyboard.press('Enter');
+                        await delay(500);
+                        await tryClickSend(page);
+                        await injectObserver(page, 'gemini');
+                        return true;
+                    } catch (_) { }
+                }
+                return false;
             };
 
             // --- Robust Fire & Forget: Sequential Open & Send ---
+            // Per-run page map (used by dispatch/collect)
             const pages = {};
 
+            // ... (in dispatchAgent)
             // Dispatch Agent: Open -> Navigate -> Send (Atomic Sequential Operation)
             const dispatchAgent = async (worker) => {
                 logInternal(`[Dispatch] Worker ${worker.id} starting...`);
                 onProgress({ status: 'worker_active', message: `[Agency] ${worker.name} 에게 요청 전송...` });
 
                 try {
-                    const page = await browserContext.newPage();
+                    // TAB REUSE LOGIC
+                    let page = globalPagePool[worker.id];
+
+                    // Validate existing page
+                    if (page) {
+                        try {
+                            if (page.isClosed()) page = null;
+                            else {
+                                // Just check connectivity
+                                await page.evaluate(() => document.body).catch(() => page = null);
+                            }
+                        } catch (e) { page = null; }
+                    }
+
+                    if (!page) {
+                        page = await browserContext.newPage();
+                        globalPagePool[worker.id] = page;
+                        logInternal(`[Dispatch] Worker ${worker.id} - New Tab Created`);
+                    } else {
+                        logInternal(`[Dispatch] Worker ${worker.id} - Tab Reused`);
+                    }
+
                     pages[worker.id] = page;
 
-                    // 1. Navigation
-                    await page.goto(worker.url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+                    // 1. Navigation (Skip if already on correct domain, maybe just reload or check)
+                    // Actually, for AI agents, we often need 'New Chat' or fresh state.
+                    // But loading the URL again is faster than new tab + URL.
+                    // Optimization: Check if URL host matches
+                    const currentUrl = page.url();
+                    if (!currentUrl.includes(new URL(worker.url).hostname)) {
+                        await page.goto(worker.url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+                    } else {
+                        // Already on site, maybe click 'New Chat' or just navigate to base URL for fresh start
+                        // Most agents redirect to /c/uuid. Going to base URL is safest way to new chat.
+                        await page.goto(worker.url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+                    }
 
                     // 2. Login/Modal Checks
                     if (worker.id === 'gemini') {
@@ -543,15 +796,31 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
 
                     // Helper: Check if generation started
                     const checkGenerationStarted = async () => {
-                        return await page.evaluate(() => {
+                        return await page.evaluate((wid) => {
                             const indicators = [
-                                'button[aria-label*="Stop"]', 'button[aria-label*="중단"]', 'button[data-testid*="stop"]',
+                                'button[aria-label*="Stop"]', 'button[aria-label*="??"]', 'button[data-testid*="stop"]',
                                 '[aria-label="Stop generating"]', '.result-streaming', '.model-response', '.assistant-response'
                             ];
-                            // Also check if user message appeared (simpler check)
+                            const hasIndicator = indicators.some(sel => !!document.querySelector(sel));
                             const userMsg = document.body.innerText.includes(window.__RALPH_PROMPT_LAST_CHUNK || "__________");
-                            return indicators.some(sel => !!document.querySelector(sel)) || userMsg;
-                        });
+
+                            if (wid !== 'gemini') return hasIndicator || userMsg;
+
+                            const inputSel = 'rich-textarea .ql-editor, .ql-editor, div[contenteditable="true"]';
+                            const input = document.querySelector(inputSel);
+                            const inputText = input ? (input.innerText || '').trim() : '';
+                            const inputCleared = inputText.length <= 2;
+
+                            const responseNodes = document.querySelectorAll(
+                                'model-response .model-response-text, model-response [data-testid="response-content"], response-container .markdown, response-container .model-response-text'
+                            );
+                            let hasResponseText = false;
+                            for (const n of responseNodes) {
+                                if (n && n.innerText && n.innerText.trim().length > 0) { hasResponseText = true; break; }
+                            }
+
+                            return hasIndicator || hasResponseText || (userMsg && inputCleared);
+                        }, worker.id);
                     };
 
                     // Store prompt chunk for verification
@@ -589,12 +858,20 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
                                 await tryClickSend(page);
 
                                 // VERIFICATION
-                                await delay(2000); // Wait for UI update
-                                if (await checkGenerationStarted()) {
+                                const verifyTimeout = worker.id === 'perplexity' ? 4000 : 7000;
+                                await delay(1500);
+
+                                let verified = false;
+                                for (let v = 0; v < 3; v++) {
+                                    if (await checkGenerationStarted()) { verified = true; break; }
+                                    await delay(1000);
+                                }
+
+                                if (verified) {
                                     inputSuccess = true;
                                     logInternal(`[Dispatch] Worker ${worker.id} sent verified.`);
-                                    if (worker.id === 'claude' || worker.id === 'gemini') await injectObserver(page);
-                                    break; // Selector worked, send verified
+                                    if (worker.id === 'claude' || worker.id === 'gemini') await injectObserver(page, worker.id);
+                                    break;
                                 } else {
                                     logInternal(`[Dispatch] Worker ${worker.id} verification failed.`);
                                 }
@@ -612,13 +889,28 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
                 }
             };
 
-            // Execute Dispatch Sequentially
+            // Parallel Dispatch with Concurrency Pool (Limit: 3)
             const dispatchResults = [];
-            logInternal('[Agency] Phase 1: Sequential Dispatch...');
-            for (const worker of activeWorkers) {
-                dispatchResults.push(await dispatchAgent(worker));
-                await delay(1000); // Buffer
-            }
+            logInternal('[Agency] Phase 1: Parallel Dispatch (Pool Limit: 3)...');
+
+            const runDispatchWithPool = async (workers, limit) => {
+                const results = [];
+                const executing = new Set();
+                for (const worker of workers) {
+                    const p = Promise.resolve().then(() => dispatchAgent(worker));
+                    results.push(p);
+                    executing.add(p);
+                    const clean = () => executing.delete(p);
+                    p.then(clean).catch(clean);
+                    if (executing.size >= limit) {
+                        await Promise.race(executing);
+                    }
+                }
+                return Promise.all(results);
+            };
+
+            const dispatchBatchResults = await runDispatchWithPool(activeWorkers, 3);
+            dispatchResults.push(...dispatchBatchResults);
 
             // 2. Collection Phase: Scrape results from open pages
             // 2. Collection Phase: Scrape results from open pages (PARALLEL for Performance)
@@ -639,6 +931,20 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
                 onProgress({ status: 'streaming', service: worker.id, content: '(응답 수신 대기 중...)' });
 
                 try {
+                    // Step 2.3: Wait for response container before extraction
+                    const containerSel = getResponseRoot(worker.id);
+                    if (containerSel && containerSel !== 'body') {
+                        await page.waitForSelector(containerSel, { timeout: 8000 }).catch(() => {
+                            logInternal(`[Collect] Wait for ${worker.id} container ${containerSel} timed out.`);
+                        });
+                    }
+
+                    if (worker.id === 'gemini') {
+                        await page.waitForSelector('model-response .model-response-text, model-response [data-testid=\"response-content\"], response-container .markdown', { timeout: 15000 }).catch(() => {
+                            logInternal('[Collect] Wait for gemini response text timed out.');
+                        });
+                    }
+
                     let lastText = "";
                     let stableCount = 0;
                     const minLength = worker.id === 'perplexity' ? 50 : 15;
@@ -650,9 +956,21 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
 
                         // Extraction Logic
                         if (worker.id === 'gemini') {
+                            if (await isGeminiStopped(page)) {
+                                const resent = await resendGemini(page, worker);
+                                if (!resent) throw new Error('gemini_stopped');
+                                await delay(1500);
+                                if (await isGeminiStopped(page)) throw new Error('gemini_stopped');
+                            }
                             candidate = await getGeminiResponseText(page);
                         } else if (worker.id === 'claude') {
                             candidate = await getClaudeResponseText(page);
+                        } else if (worker.id === 'chatgpt') {
+                            candidate = await getChatGPTResponseText(page);
+                            if (!candidate) {
+                                const resultSels = Array.isArray(worker.result) ? worker.result : [worker.result];
+                                candidate = await getCleanText(page, resultSels);
+                            }
                         } else {
                             const resultSels = Array.isArray(worker.result) ? worker.result : [worker.result];
                             candidate = await getCleanText(page, resultSels);
@@ -662,6 +980,10 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
                         if (worker.id === 'claude') candidate = sanitizeClaudeOutput(candidate);
                         if (worker.id === 'perplexity') candidate = sanitizePerplexityOutput(candidate);
                         if (worker.id === 'gemini') candidate = sanitizeGeminiOutput(candidate, worker.prompt);
+
+                        if (looksLikeUiNoise(candidate)) {
+                            candidate = null;
+                        }
 
                         const isThinking = (!candidate || candidate.length < minLength);
 
@@ -680,29 +1002,51 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
                         if (stableCount >= 3 && lastText.length >= minLength) break;
                     }
                     logInternal(`[Collect] Worker ${worker.id} finished: ${lastText.length} chars.`);
+                    if (looksLikeUiNoise(lastText)) {
+                        throw new Error('noisy_output');
+                    }
                     await page.close();
                     return { id: worker.id, value: lastText };
                 } catch (e) {
+                    // SNAPSHOT ON ERROR
+                    const ts = Date.now();
+                    try {
+                        await page.screenshot({ path: `debug_${worker.id}_collect_${ts}.png`, fullPage: false }).catch(() => { });
+                        const html = await page.content().catch(() => { });
+                        if (html) fs.writeFileSync(`debug_${worker.id}_collect_${ts}.html`, html);
+                    } catch (_) { }
+
                     await page.close().catch(() => { });
-                    return { id: worker.id, value: `Error: ${e.message}` };
+                    globalPagePool[worker.id] = null; // Remove from pool if error
+
+                    let errMsg = e.message;
+                    if (errMsg === 'noisy_output') {
+                        errMsg = '결과물에 UI 잡음이 너무 많습니다 (로그인 필요 또는 세션 만료 의심)';
+                    } else if (errMsg === 'gemini_stopped') {
+                        errMsg = 'Gemini 응답이 중단되었습니다 (대답이 중지되었습니다)';
+                    }
+                    return { id: worker.id, value: `Error: ${errMsg}` };
                 }
+                // SUCCESS: Do NOT close page. Keep it for Page Pool reuse.
+                // await page.close(); 
+                return { id: worker.id, value: lastText };
             };
 
             // Run Collection in Parallel Batches (Concurrency 2 or 4)
             // Since scraping isn't CPU heavy, we can increase concurrency to 4 to maximize speed
             const collectionConcurrency = 4;
-            const results = [];
+            const collectionResults = [];
             for (let i = 0; i < activeWorkers.length; i += collectionConcurrency) {
                 const batch = activeWorkers.slice(i, i + collectionConcurrency);
                 const batchPromises = batch.map(w => collectResult(w));
                 const batchSettled = await Promise.allSettled(batchPromises);
                 for (const s of batchSettled) {
-                    if (s.status === 'fulfilled') results.push(s.value);
-                    else results.push({ id: 'unknown', value: `Top-level Error: ${s.reason}` });
+                    if (s.status === 'fulfilled') collectionResults.push(s.value);
+                    else collectionResults.push({ id: 'unknown', value: `Top-level Error: ${s.reason}` });
                 }
             }
 
-            for (const r of results) rawData[r.id] = r.value;
+            for (const r of collectionResults) rawData[r.id] = r.value;
             const agentStatus = {};
             for (const w of workers) {
                 if (!enabledAgents[w.id]) {
@@ -715,7 +1059,10 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
                     continue;
                 }
                 const text = String(val);
-                if (text.includes('NEEDS_WEB') || text.startsWith('에러:') || text.startsWith('Error:') || text.length < 50) {
+                const minOkLength = 12;
+                const isErrorText = text.includes('NEEDS_WEB') || text.startsWith('에러:') || text.startsWith('Error:');
+                const isNoisy = looksLikeUiNoise(text);
+                if (isErrorText || isNoisy || text.length < minOkLength) {
                     agentStatus[w.id] = 'error';
                 } else {
                     agentStatus[w.id] = 'ok';
@@ -728,112 +1075,10 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
                 onProgress({ status: 'agent_status', message: `[상태] 일부 에이전트 응답이 불완전합니다: ${failedAgents.join(', ')}` });
             }
 
-            // --- 3. Logic Phase (L) ---
-            onProgress({ status: 'logic_validation', message: '[Logic] 수집된 답변의 교차 검증 및 논리적 모순 체크 중...' });
-            const validationPrompt = `다음 에이전트 출력들을 "논리 검증 보고서" 형식으로 정돈해줘.\n\nDATA:\n${JSON.stringify(rawData)}\n\nAGENT_STATUS:\n${JSON.stringify(agentStatus)}\n\n[CRITICAL RULES]\n- 제공된 원자료(DATA)에만 근거할 것. 특히 티커(Ticker) 매칭 오류가 없는지 엄격히 검증할 것 (예: ONDS=Ondas Holdings)\n- 에이전트 간의 정보 충돌(할루시네이션)을 최우선으로 리포트할 것\n- 웹 검색/도구 사용 금지\n- 새로운 사실/수치 추가 금지\n- 한국어로 작성\n- 마크다운 형식 사용\n\n# 논리 검증 보고서\n## 0. 메타\n- 기준 시점: (알 수 없으면 정보 부족)\n- 검증 범위: (질문 요약)\n- 입력 상태 요약: (에이전트 상태 요약)\n\n## 1. 3줄 요약\n- ...\n\n## 2. 할루시네이션/오류 감지 (필수)\n- ...\n\n## 3. 합의 vs 불일치 요약\n|주제|합의 내용|불일치 내용|조정 결과|\n|---|---|---|---|\n\n## 4. 충돌/모순/모호함 표\n|항목|충돌 내용|영향도|정정 필요|\n|---|---|---|---|\n\n## 5. 정합성 점수(0~100) 및 근거\n- 점수: \n- 근거: \n\n## 6. 개선 항목\n- ...`;
+            // --- 3. Logic Phase (L) - SKIPPED for Performance (Integrated into Final Synthesis) ---
+            let validationReport = "(최종 합성 단계에서 통합 검증 수행함)";
+            logInternal('[Logic] Skipping separate validation step for performance.');
 
-            const validationOrder = ['claude', 'chatgpt', 'gemini', 'perplexity'];
-            // Priority: Enabled AND OK status > Enabled but Error status
-            let validationId = validationOrder.find(id => enabledAgents[id] && agentStatus[id] === 'ok');
-            if (!validationId) validationId = validationOrder.find(id => enabledAgents[id]);
-
-            let validationReport = validationId
-                ? `검증 대기 중 (${workerById[validationId].name})`
-                : '검증 생략: 활성화된 에이전트가 없습니다.';
-
-            if (validationId) {
-                const validator = workerById[validationId];
-                const logicPage = await browserContext.newPage();
-                try {
-                    await logicPage.goto(validator.url, { waitUntil: 'domcontentloaded', timeout: 60000 });
-                    let inputUsed = false;
-                    for (const sel of (Array.isArray(validator.input) ? validator.input : [validator.input])) {
-                        try {
-                            await logicPage.waitForSelector(sel, { timeout: 8000 });
-                            // Robust Input Strategy (Logic Phase)
-                            if (validationId === 'claude' || validationId === 'gemini') {
-                                await logicPage.click(sel);
-                                await delay(500);
-                                await pasteInput(logicPage, validationPrompt);
-                                await delay(800);
-
-                                // 1. Control + Enter
-                                await logicPage.keyboard.press('Control+Enter');
-                                await delay(1000);
-
-                                // 2. Enter (Fallback)
-                                const activeElement = await logicPage.evaluate(() => document.activeElement.tagName);
-                                if (activeElement === 'BODY') await logicPage.click(sel);
-                                await logicPage.keyboard.press('Enter');
-                                await delay(1000);
-
-                                // 3. Click Send Button (Ultimate Fallback)
-                                await tryClickSend(logicPage);
-                            } else {
-                                // Legacy for others
-                                await logicPage.click(sel);
-                                await logicPage.keyboard.insertText(validationPrompt);
-                                await logicPage.keyboard.press('Enter');
-                                if (validationId === 'chatgpt') {
-                                    await delay(800);
-                                    await tryClickSend(logicPage);
-                                }
-                            }
-
-                            inputUsed = true;
-                            // Initialize Observer for extraction (Logic Phase)
-                            if (validationId === 'claude' || validationId === 'gemini') {
-                                await injectObserver(logicPage);
-                            }
-                            break;
-                        } catch (_) { /* try next */ }
-                    }
-                    if (!inputUsed) {
-                        validationReport = `검증 실패: ${validator.name}의 입력창을 찾을 수 없습니다. (로그인 필요 가능성)`;
-                        throw new Error(`validation input selector not found`);
-                    }
-                    await delay(5000);
-                    let lastValidText = "";
-                    let stableTicks = 0;
-                    for (let i = 0; i < 20; i++) {
-                        await delay(2000);
-                        let candidate = "";
-                        if (validationId === 'claude' || validationId === 'gemini') {
-                            const fullText = await logicPage.evaluate(() => window.__RALPH_LATEST || document.body.innerText);
-                            candidate = fullText;
-                        } else {
-                            candidate = await getCleanText(
-                                logicPage,
-                                (Array.isArray(validator.result) ? validator.result : [validator.result]),
-                                { allowFallback: true }
-                            );
-                        }
-                        if (validationId === 'claude') candidate = sanitizeClaudeOutput(candidate);
-                        if (validationId === 'perplexity') candidate = sanitizePerplexityOutput(candidate);
-                        if (validationId === 'gemini') candidate = sanitizeGeminiOutput(candidate, validationPrompt);
-
-                        if (candidate && candidate.length > 20) {
-                            if (candidate === lastValidText) {
-                                stableTicks++;
-                            } else {
-                                lastValidText = candidate;
-                                stableTicks = 0;
-                                validationReport = lastValidText;
-                                onProgress({ status: 'streaming', service: 'validation', content: validationReport });
-                            }
-                        }
-
-                        // Early exit if stable for 3 ticks (6 seconds)
-                        if (stableTicks >= 3 && lastValidText.length > 100) break;
-                    }
-                    if (lastValidText) validationReport = lastValidText;
-                    if (validationReport.startsWith('검증 대기 중')) {
-                        validationReport = `검증 실패: ${validator.name}로부터 응답을 받지 못했습니다.`;
-                    }
-                } catch (e) {
-                    validationReport = `검증 실패: ${validator.name} 작업 중 오류 발생 (${e.message})`;
-                } finally { await logicPage.close(); }
-            }
             // --- 4. Polish & Hierarchy Phase (P/H) ---
             const finalOrder = ['chatgpt', 'perplexity', 'gemini', 'claude'];
             // Priority: Enabled AND OK status > Enabled but Error status
@@ -846,38 +1091,49 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
             onProgress({ status: 'polish_synthesis', message: `[정리] 최종 합성 진행 중 (${workerById[finalId].name})` });
             const finalPrompt = `질문: "${prompt}"
 
-원자료(에이전트 원문):
-${JSON.stringify(rawData)}
+[DATA ONLY]:
+에이전트 원문: ${JSON.stringify(rawData)}
+에이전트 상태: ${JSON.stringify(agentStatus)}
 
-에이전트 상태:
-${JSON.stringify(agentStatus)}
+[QA RULES - 심사 및 품질 보증 원칙]:
+1. **[CONSENSUS RULES] 합의 및 신뢰도 등급**:
+   - **High (확실)**: 3개 이상의 에이전트가 공통적으로 주장하는 사실. (Executive Summary의 핵심 근거로 사용)
+   - **Medium (유력)**: 2개 에이전트가 일치하는 사실. (본문에 포함하되 '가능성이 있다'로 서술)
+   - **Low (불확실)**: 1개 에이전트만 주장하는 내용. (검증 필요 섹션으로 격리하거나 제외)
+   
+2. **[NUMERIC VALIDATION] 정량 근거 검증**:
+   - **수치/확률/비율**이 등장하면 반드시 제공된 원문 내에 출처가 존재하는지 확인하십시오.
+   - 출처가 불분명한 수치는 "추정"으로 표기하고 요약 본문(Executive Summary)에서 제외하십시오.
 
-논리 검증 요약:
-${validationReport}
+3. **[ANTI-HALLUCINATION] 지식 잠금**:
+   - 제공된 '원자료'에 없는 내용은 절대로 추가하지 마시오. 외부 지식/수치 사용 금지.
+   - 문맥상 필요한 보충 설명이라도 원문에 없으면 추가하지 마시오.
+
+4. **[TONE & STYLE] 컨설팅 톤**:
+   - 문장은 간결하고 단정적 ("~임", "~함" 대신 완결된 문장 사용 권장).
+   - "가능할 수도 있다" 식의 모호한 표현 지양. 근거가 있으면 확언하고, 없으면 "불확실"로 명시.
 
 작성 규칙:
-- 한국어 작성, 최상급 컨설팅 리포트 톤 (McKinsey/Bain 스타일)
-- 문장은 간결하고 단정적 ("~임", "~함" 대신 완결된 문장 사용 권장)
-- "불확실성"과 "확정 사실"을 엄격히 구분
+- 한국어 작성, 보고서 구조 준수
 - 감성적 수식어 제거, 구조적 인과관계 중심 서술
-- 새로운 사실/수치 창작 금지 (원문 기반)
+- 마크다운 섹션 헤더(#, ##)와 테이블(|) 형식을 엄격히 유지할 것
 
 # 종합 인텔리전스 보고서: ${prompt}
 
 ## 2.0 커버 & 메타
 - 분석 대상: (질문 키워드)
 - 데이터 출처: (활성 에이전트 목록)
-- 분석 신뢰도: (데이터 충실도에 따른 High/Med/Low)
+- 분석 신뢰도: (High/Med/Low - 합의 수준에 따라)
 
-## 2.1 Executive Summary
-- 핵심 결론(3줄 요약): (가장 중요한 발견 통찰)
-- 주요 리스크: (핵심 불확실성 1가지)
-- 권고 액션: (가장 시급한 다음 단계)
+## 2.1 Executive Summary (High confidence only)
+- 핵심 결론(3줄 요약): (3개 이상 에이전트가 합의한 핵심 통찰)
+- 주요 리스크: (핵심 불확실성/충돌 지점)
+- 권고 액션: (데이터 기반 최적의 다음 단계)
 
 ## 2.2 핵심 인사이트 Top 5
-| 인사이트 | 근거 요약 | 영향도(H/M/L) | 신뢰도(★) |
+| 인사이트 | 근거 요약 | 영향도(H/M/L) | 신뢰도(High/Med/Low) |
 |---|---|---|---|
-| (인사이트1) | ... | ... | ... |
+| (인사이트1) | ... | ... | (합의 수준 기재) |
 | (인사이트2) | ... | ... | ... |
 ...
 
@@ -892,16 +1148,16 @@ ${validationReport}
 - **전개 메커니즘(Path)**: (원인이 결과로 이어지는 논리적 경로)
 - **최종 결과(Impact)**: (현재 관측되는 현상)
 
-## 2.5 시나리오 플래닝
+## 2.5 시나리오 플래닝 (수치 근거 필수)
 | 시나리오 | 가능성 | 핵심 조건(Trigger) | 예상 파급효과 |
 |---|---|---|---|
 | 베이스(Base) | (Up/Down) | ... | ... |
 | 상승(Bull) | ... | ... | ... |
 | 하락(Bear) | ... | ... | ... |
 
-## 2.6 리스크 & 불확실성
+## 2.6 리스크 & 불확실성 & 가설
 - **데이터 공백**: (확인되지 않은 정보)
-- **논리적 충돌**: (해석이 갈리는 부분)
+- **추정 및 가설**: (근거가 부족하거나 Low 신뢰도인 주장들)
 - **외부 변수**: (통제 불가능한 요인)
 
 ## 2.7 전략 옵션 & 권고 액션
@@ -917,34 +1173,50 @@ ${validationReport}
 - 사용 에이전트 상세 상태: ${JSON.stringify(agentStatus)}
 `;
 
-            const finalPage = await browserContext.newPage();
+            // Reuse Page for Final Synthesis (Wait for page pool)
+            logInternal(`[Polish] Synthesis starting with agent: ${finalId}`);
+            let finalPage = globalPagePool[finalId];
+            if (!finalPage || finalPage.isClosed()) {
+                finalPage = await browserContext.newPage();
+                globalPagePool[finalId] = finalPage;
+                await finalPage.goto(workerById[finalId].url, { waitUntil: 'domcontentloaded' });
+            } else {
+                // Ensure focus
+                await finalPage.bringToFront();
+            }
+
             let finalOutput = "최종 합성 진행 중";
             try {
                 const finalWorker = workerById[finalId];
-                await finalPage.goto(finalWorker.url, { waitUntil: 'domcontentloaded', timeout: 60000 });
-                const finalInputs = Array.isArray(finalWorker.input) ? finalWorker.input : [finalWorker.input];
-                let finalInputFound = false;
-                for (const sel of finalInputs) {
+                logInternal(`[Polish] Sending synthesis prompt to ${finalId}...`);
+                // Robust Send Logic (Triple Send) for Synthesis
+                for (const sel of (Array.isArray(finalWorker.input) ? finalWorker.input : [finalWorker.input])) {
                     try {
-                        await finalPage.waitForSelector(sel, { timeout: 3000 });
-                        try { await finalPage.fill(sel, finalPrompt); } catch (_) {
-                            await finalPage.click(sel).catch(() => { });
-                            await finalPage.keyboard.type(finalPrompt, { delay: 8 });
-                        }
-                        if (finalId === 'gemini') {
-                            const sent = await tryClickSend(finalPage);
-                            if (!sent) await finalPage.keyboard.press('Enter');
-                        } else {
-                            await finalPage.keyboard.press('Enter');
-                        }
-                        finalInputFound = true;
+                        await finalPage.waitForSelector(sel, { timeout: 5000 });
+                        await finalPage.click(sel);
+                        await delay(300);
+
+                        // Try Fill first
+                        try { await finalPage.fill(sel, finalPrompt); } catch (_) { await pasteInput(finalPage, finalPrompt); }
+
+                        await delay(500);
+                        await finalPage.keyboard.press('Control+Enter');
+                        await delay(800);
+                        await finalPage.keyboard.press('Enter');
+                        await tryClickSend(finalPage);
+                        logInternal(`[Polish] Synthesis prompt sent to ${finalId}`);
                         break;
-                    } catch (_) { /* try next */ }
+                    } catch (e) {
+                        logInternal(`[Polish] Selector ${sel} failed for synthesis send.`);
+                    }
                 }
-                if (!finalInputFound) {
-                    throw new Error('final input selector not found');
+
+                if (finalId === 'claude' || finalId === 'gemini') {
+                    logInternal(`[Polish] Injecting observer for ${finalId}`);
+                    await injectObserver(finalPage, finalId);
                 }
                 await delay(5000);
+                logInternal(`[Polish] Starting extraction loop for ${finalId}...`);
                 for (let i = 0; i < 20; i++) {
                     await delay(2000);
                     const current = finalId === 'gemini'
@@ -958,18 +1230,22 @@ ${validationReport}
                     if (finalId === 'claude') candidate = sanitizeClaudeOutput(candidate);
                     if (finalId === 'perplexity') candidate = sanitizePerplexityOutput(candidate);
                     if (finalId === 'gemini') candidate = sanitizeGeminiOutput(candidate, finalPrompt);
-                    if (candidate) {
-                        finalOutput = candidate;
+                    if (candidate && candidate.length > (finalOutput.length + 5)) {
+                        finalOutput = normalizeReport(candidate);
                         onProgress({ status: 'streaming', service: 'optimal', content: finalOutput });
                     }
                 }
-            } finally { await finalPage.close(); }
+                logInternal(`[Polish] Synthesis finished: ${finalOutput.length} chars.`);
+            } finally {
+                // Do NOT close for Page Pool Reuse
+                // await finalPage.close(); 
+            }
 
             return {
                 results: rawData,
                 validationReport: validationReport,
-                optimalAnswer: finalOutput,
-                summary: finalOutput
+                optimalAnswer: normalizeReport(finalOutput),
+                summary: normalizeReport(finalOutput)
             };
 
         } catch (error) {
@@ -981,12 +1257,17 @@ ${validationReport}
                 throw error;
             }
         } finally {
-            try {
-                if (browserContext) await browserContext.close();
-            } catch (_) { }
-            try {
-                if (browser) await browser.close();
-            } catch (_) { }
+            // Performance: Do NOT close if we want to reuse globalContext
+            // Only close if it was a temporary context or if we decided to scrap it (e.g. error)
+            /* 
+               Actually, if we are in 'Hot-Start' mode, we keep it open.
+               But if an error occurred that might have corrupted the session, maybe we should close?
+               For now, let's keep it open unless it's explicitly nullified.
+            */
+            if (!globalContext && browserContext) {
+                try { await browserContext.close(); } catch (_) { }
+            }
+            // If it IS globalContext, we leave it open!
         }
     }
     throw lastError;
