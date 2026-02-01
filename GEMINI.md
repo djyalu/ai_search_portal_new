@@ -105,7 +105,7 @@
 ### Phase 17: Server Execution & Session Verification
 - **Date**: 2026-01-28
 - **Action**: Starting backend and frontend servers. Verifying Playwright session stability.
-- **Status**: Completed
+- **Status**: Completed (Verified with Microsoft Edge)
 
 ### Phase 18: UI Redesign (Lab + Analytics Style)
 - **Date**: 2026-01-28
@@ -209,4 +209,44 @@
   - **Report Engine Upgrade**: Implemented `INTELLIGENCE-REPORT-FORMAT-UPGRADE.md`.
     - **Structure**: Executive Summary, Agreement Matrix, Drivers-Mechanism-Impact Logic, Scenario Planning.
     - **Tone**: McKinsey/Bain style consulting voice with strict confidence scoring.
+- **Status**: Completed
+### Phase 36: Performance Breakthrough (Global Context & Resource Blocking)
+- **Date**: 2026-02-01
+- **Action**: 
+  - **Global Context Reuse**: Implemented persistent browser context (`globalContext`) to bypass 3-5s restart latency on repeated runs (Hot-Start).
+  - **Resource Blocking**: Blocked images, fonts, and media at network level to strictly prioritize text content loading.
+  - **Result**: Immediate input processing on second run (0s init time).
+- **Status**: Completed
+
+### Phase 37: Accuracy & Anti-Hallucination Engine
+- **Date**: 2026-02-01
+- **Action**: 
+  - **Rule Integration**: Implemented `ANTI-HALLUCINATION-RULESET.md` into the Final Synthesis prompt.
+  - **Knowledge Lock**: Strictly enforced "No external knowledge/numbers" rule.
+  - **Consensus Logic**: Defined High/Medium/Low confidence tiers based on agent agreement (3+ vs 2 vs 1).
+  - **Confidence Scoring**: Mandated explicit confidence markings in Executive Summary and Insights.
+- **Status**: Completed
+
+### Phase 38: Stability Bug Fix (Variable Scoping)
+- **Date**: 2026-02-01
+- **Action**: 
+  - **Variable Definition**: Fixed `ReferenceError: pages is not defined` by correctly declaring the per-run `pages` map in `playwright_handler.js`.
+  - **Scope Optimization**: Moved `globalPagePool` to the global scope to ensure cross-run tab reuse, while keeping `pages` local to ensure run atomicity.
+- **Status**: Completed
+
+### Phase 39: Noise Handling Strategy (Collection vs Report)
+- **Date**: 2026-02-01
+- **Action**: 
+  - **Strategy Implemented**: Followed `NOISE-HANDLING-STRATEGY-REPORT.md` to split filtering into "Minimum Collection" and "Strong Report" stages.
+  - **Enhanced Normalization**: Upgraded `normalizeReport` with flexible preamble/echo stripping and boilerplate removal.
+  - **Diagnostic Errors**: Improved `collectResult` to provide descriptive errors when UI noise is detected (Noisy Output -> Session Check).
+- **Status**: Completed
+
+### Phase 40: Agent Error Root Cause Improvement (ChatGPT/Gemini)
+- **Date**: 2026-02-01
+- **Action**: 
+  - **ChatGPT Extraction**: Implemented `getChatGPTResponseText` to precisely target `conversation-turn` assistant blocks.
+  - **Gemini Stability**: Added `isGeminiStopped` detection to catch "대답이 중지되었습니다" errors and trigger retries.
+  - **Hybrid Collection**: Enhanced Gemini/Claude helpers to use Observer text with deep DOM traversal fallback.
+  - **Timed Readiness**: Integrated `waitForSelector` for response containers in `collectResult` to ensure DOM stability before scraping.
 - **Status**: Completed
