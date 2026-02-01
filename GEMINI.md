@@ -250,3 +250,17 @@
   - **Hybrid Collection**: Enhanced Gemini/Claude helpers to use Observer text with deep DOM traversal fallback.
   - **Timed Readiness**: Integrated `waitForSelector` for response containers in `collectResult` to ensure DOM stability before scraping.
 - **Status**: Completed
+
+### Phase 41: GitHub Deployment & Global Checkpoint
+- **Date**: 2026-02-01
+- **Action**: Pushed all performance optimizations, noise handling logic, and error root-cause fixes to GitHub. Created stable checkpoint `ckpt-20260201-2157`.
+- **Status**: Completed
+
+### Phase 42: Edge Transition Stabilization & Performance (v3.8)
+- **Date**: 2026-02-01
+- **Action**: 
+  - **Perplexity Stabilization**: Implemented 120-char min-length and 12s reasoning race for snappier feedback.
+  - **Fault Tolerance**: Added 1-time automated retry for both `dispatchAgent` and `collectResult` to increase success rate on flaky sessions.
+  - **Gemini Completion**: Refined completion criteria (Stop button + Stability count 4) to ensure high-quality scraping.
+  - **Observability**: Standardized logging with `elapsed_ms` and failure-reason-coded snapshots (short, noisy, timeout).
+- **Status**: Completed
