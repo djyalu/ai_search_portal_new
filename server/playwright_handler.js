@@ -541,16 +541,17 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
                     globalPagePool['perplexity'] = planningPage;
                 }
                 strategy = "기본 분석 모드";
+                const reasoningStart = Date.now();
                 try {
-                    await planningPage.goto('https://www.perplexity.ai/', { waitUntil: 'domcontentloaded', timeout: 60000 });
-                    try {
-                        // try multiple possible input selectors in order (include Perplexity-specific id)
+                    // Optimization: 15s limit for reasoning
+                    await planningPage.goto('https://www.perplexity.ai/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+
+                    const planningTask = (async () => {
                         const planningInputs = ['#ask-input', '[data-lexical-editor="true"]', 'div[contenteditable="true"]', 'textarea', '#prompt-textarea'];
                         let inputFound = false;
                         for (const sel of planningInputs) {
                             try {
                                 await planningPage.waitForSelector(sel, { timeout: 3000 });
-                                // prefer fill, fallback to click+type
                                 try { await planningPage.fill(sel, planningPrompt); } catch (_) {
                                     await planningPage.click(sel).catch(() => { });
                                     await planningPage.keyboard.type(planningPrompt, { delay: 10 });
@@ -558,24 +559,29 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
                                 await planningPage.keyboard.press('Enter');
                                 inputFound = true;
                                 break;
-                            } catch (_) { /* try next selector */ }
+                            } catch (_) { }
                         }
-                        if (!inputFound) {
-                            console.error('planning input selector not found');
-                            throw new Error('planning input selector not found');
-                        }
-                    } catch (err) {
-                        throw err;
-                    }
-                    await delay(5000);
-                    strategy = await getCleanText(planningPage, ['.prose', '.result', '.message-content']) || "기본 전략 가동";
-                    logInternal(`Reasoning 완료. Strategy: ${strategy.substring(0, 50)}...`);
-                    await Promise.all(warmUps); // Finish other warmups during reasoning
+                        if (!inputFound) throw new Error('Planning input not found');
+
+                        await delay(5000);
+                        const result = await getCleanText(planningPage, ['.prose', '.result', '.message-content']) || "기본 전략 가동";
+                        return result;
+                    })();
+
+                    // Race planning with a 12s total timeout after navigation (Snappy feed)
+                    strategy = await Promise.race([
+                        planningTask,
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('Reasoning Timeout')), 12000))
+                    ]);
+
+                    const elapsed = Date.now() - reasoningStart;
+                    logInternal(`[Reasoning] Completed in ${elapsed}ms. Strategy: ${strategy.substring(0, 40)}...`);
+                    await Promise.all(warmUps);
                 } catch (err) {
-                    // keep going but log planning error
-                    strategy = `에러 발생: ${err.message}`;
+                    strategy = `기본 분석 모드 (Reasoning Status: ${err.message})`;
+                    logInternal(`[Reasoning] Failed or Timeout: ${err.message}. Cascading to default Agency.`);
+                    await Promise.all(warmUps);
                 }
-                // Do NOT close Perplexity page - keep for agency reuse
             }
 
             // --- 2. Agency Phase (A) ---
@@ -604,7 +610,7 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
             if (cleanStrategy.length > 1200) {
                 cleanStrategy = cleanStrategy.substring(0, 1200);
             }
-const workers = [
+            const workers = [
                 {
                     id: 'perplexity',
                     name: 'Perplexity',
@@ -698,7 +704,7 @@ const workers = [
             const isGeminiStopped = async (page) => {
                 return await page.evaluate(() => {
                     const bodyText = document.body?.innerText || '';
-                    return bodyText.includes('????????? ?????????????????????') || bodyText.includes('Response generation stopped');
+                    return bodyText.includes('대답이 중지되었습니다') || bodyText.includes('Response generation stopped');
                 });
             };
 
@@ -731,162 +737,97 @@ const workers = [
             // ... (in dispatchAgent)
             // Dispatch Agent: Open -> Navigate -> Send (Atomic Sequential Operation)
             const dispatchAgent = async (worker) => {
-                logInternal(`[Dispatch] Worker ${worker.id} starting...`);
-                onProgress({ status: 'worker_active', message: `[Agency] ${worker.name} 에게 요청 전송...` });
+                const startTime = Date.now();
+                let retryCount = 0;
+                const MAX_DISPATCH_RETRIES = 1;
 
-                try {
-                    // TAB REUSE LOGIC
-                    let page = globalPagePool[worker.id];
+                const attemptDispatch = async () => {
+                    logInternal(`[Dispatch] Worker ${worker.id} attempt ${retryCount + 1}...`);
+                    onProgress({ status: 'worker_active', message: `[Agency] ${worker.name} 에게 요청 전송...` });
 
-                    // Validate existing page
-                    if (page) {
-                        try {
-                            if (page.isClosed()) page = null;
-                            else {
-                                // Just check connectivity
-                                await page.evaluate(() => document.body).catch(() => page = null);
-                            }
-                        } catch (e) { page = null; }
-                    }
-
-                    if (!page) {
-                        page = await browserContext.newPage();
-                        globalPagePool[worker.id] = page;
-                        logInternal(`[Dispatch] Worker ${worker.id} - New Tab Created`);
-                    } else {
-                        logInternal(`[Dispatch] Worker ${worker.id} - Tab Reused`);
-                    }
-
-                    pages[worker.id] = page;
-
-                    // 1. Navigation (Skip if already on correct domain, maybe just reload or check)
-                    // Actually, for AI agents, we often need 'New Chat' or fresh state.
-                    // But loading the URL again is faster than new tab + URL.
-                    // Optimization: Check if URL host matches
-                    const currentUrl = page.url();
-                    if (!currentUrl.includes(new URL(worker.url).hostname)) {
-                        await page.goto(worker.url, { waitUntil: 'domcontentloaded', timeout: 60000 });
-                    } else {
-                        // Already on site, maybe click 'New Chat' or just navigate to base URL for fresh start
-                        // Most agents redirect to /c/uuid. Going to base URL is safest way to new chat.
-                        await page.goto(worker.url, { waitUntil: 'domcontentloaded', timeout: 60000 });
-                    }
-
-                    // 2. Login/Modal Checks
-                    if (worker.id === 'gemini') {
-                        const signedOut = await isGeminiSignedOut(page);
-                        if (signedOut) {
-                            await delay(3000);
-                            if (await isGeminiSignedOut(page)) throw new Error('Signed out');
+                    try {
+                        let page = globalPagePool[worker.id];
+                        if (page) {
+                            try {
+                                if (page.isClosed()) page = null;
+                                else await page.evaluate(() => document.body).catch(() => page = null);
+                            } catch (e) { page = null; }
                         }
-                    } else if (worker.id === 'claude') {
-                        if (await isClaudeSignedOut(page)) throw new Error('Signed out');
-                        await page.evaluate(() => {
-                            const btn = document.querySelector('button:has-text("Acknowledge"), button:has-text("Got it")');
-                            if (btn) btn.click();
-                        }).catch(() => { });
-                    } else if (worker.id === 'chatgpt') {
-                        if (await isChatGPTSignedOut(page)) throw new Error('Signed out');
-                    }
 
-                    // 3. Input & Send with Verification (Hybrid & Retry)
-                    await delay(500);
-                    const workerPrompt = worker.prompt;
-                    let inputSuccess = false;
+                        if (!page) {
+                            page = await browserContext.newPage();
+                            globalPagePool[worker.id] = page;
+                        }
+                        pages[worker.id] = page;
 
-                    // Helper: Check if generation started
-                    const checkGenerationStarted = async () => {
-                        return await page.evaluate((wid) => {
-                            const indicators = [
-                                'button[aria-label*="Stop"]', 'button[aria-label*="??"]', 'button[data-testid*="stop"]',
-                                '[aria-label="Stop generating"]', '.result-streaming', '.model-response', '.assistant-response'
-                            ];
-                            const hasIndicator = indicators.some(sel => !!document.querySelector(sel));
-                            const userMsg = document.body.innerText.includes(window.__RALPH_PROMPT_LAST_CHUNK || "__________");
+                        const currentUrl = page.url();
+                        if (!currentUrl.includes(new URL(worker.url).hostname)) {
+                            await page.goto(worker.url, { waitUntil: 'domcontentloaded', timeout: 45000 });
+                        } else {
+                            await page.goto(worker.url, { waitUntil: 'domcontentloaded', timeout: 45000 });
+                        }
 
-                            if (wid !== 'gemini') return hasIndicator || userMsg;
+                        // 2. Login/Modal Checks
+                        if (worker.id === 'gemini') {
+                            if (await isGeminiSignedOut(page)) throw new Error('Signed out');
+                        } else if (worker.id === 'claude') {
+                            if (await isClaudeSignedOut(page)) throw new Error('Signed out');
+                            await page.evaluate(() => {
+                                const btn = document.querySelector('button:has-text("Acknowledge"), button:has-text("Got it")');
+                                if (btn) btn.click();
+                            }).catch(() => { });
+                        } else if (worker.id === 'chatgpt') {
+                            if (await isChatGPTSignedOut(page)) throw new Error('Signed out');
+                        }
 
-                            const inputSel = 'rich-textarea .ql-editor, .ql-editor, div[contenteditable="true"]';
-                            const input = document.querySelector(inputSel);
-                            const inputText = input ? (input.innerText || '').trim() : '';
-                            const inputCleared = inputText.length <= 2;
+                        // 3. Input & Send
+                        const workerPrompt = worker.prompt;
+                        await page.evaluate((p) => window.__RALPH_PROMPT_LAST_CHUNK = p.substring(0, 15), workerPrompt);
 
-                            const responseNodes = document.querySelectorAll(
-                                'model-response .model-response-text, model-response [data-testid="response-content"], response-container .markdown, response-container .model-response-text'
-                            );
-                            let hasResponseText = false;
-                            for (const n of responseNodes) {
-                                if (n && n.innerText && n.innerText.trim().length > 0) { hasResponseText = true; break; }
-                            }
-
-                            return hasIndicator || hasResponseText || (userMsg && inputCleared);
-                        }, worker.id);
-                    };
-
-                    // Store prompt chunk for verification
-                    await page.evaluate((p) => window.__RALPH_PROMPT_LAST_CHUNK = p.substring(0, 15), workerPrompt);
-
-                    for (let attempt = 0; attempt < 2; attempt++) {
-                        if (inputSuccess) break;
-                        logInternal(`[Dispatch] Worker ${worker.id} attempt ${attempt + 1}...`);
-
+                        let inputSuccess = false;
                         for (const sel of (Array.isArray(worker.input) ? worker.input : [worker.input])) {
                             try {
-                                const timeout = worker.id === 'perplexity' ? 10000 : 5000;
-                                await page.waitForSelector(sel, { timeout });
-
-                                // HYBRID INPUT: Click -> Clear -> Fill -> Paste -> Type (Ensures text is there)
+                                await page.waitForSelector(sel, { timeout: 5000 });
                                 await page.click(sel);
                                 await delay(300);
-
-                                // Try Fill first
                                 try { await page.fill(sel, workerPrompt); } catch (_) { await pasteInput(page, workerPrompt); }
-
-                                // Triple Send Trigger
                                 await delay(500);
                                 await page.keyboard.press('Control+Enter');
-                                await delay(800);
-
-                                // Safety Enter
-                                const activeElement = await page.evaluate(() => document.activeElement.tagName);
-                                if (activeElement === 'BODY') {
-                                    try { await page.click(sel); } catch (_) { }
-                                }
+                                await delay(500);
                                 await page.keyboard.press('Enter');
-
-                                // Smart Click
                                 await tryClickSend(page);
 
                                 // VERIFICATION
-                                const verifyTimeout = worker.id === 'perplexity' ? 4000 : 7000;
-                                await delay(1500);
-
-                                let verified = false;
-                                for (let v = 0; v < 3; v++) {
-                                    if (await checkGenerationStarted()) { verified = true; break; }
-                                    await delay(1000);
+                                for (let v = 0; v < 4; v++) {
+                                    if (await checkGenerationStarted()) { inputSuccess = true; break; }
+                                    await delay(1200);
                                 }
-
-                                if (verified) {
-                                    inputSuccess = true;
-                                    logInternal(`[Dispatch] Worker ${worker.id} sent verified.`);
-                                    if (worker.id === 'claude' || worker.id === 'gemini') await injectObserver(page, worker.id);
-                                    break;
-                                } else {
-                                    logInternal(`[Dispatch] Worker ${worker.id} verification failed.`);
-                                }
-                            } catch (e) { /* Selector failed, try next */ }
+                                if (inputSuccess) break;
+                            } catch (e) { }
                         }
+
+                        if (!inputSuccess) throw new Error('send_failed');
+
+                        const elapsed = Date.now() - startTime;
+                        logInternal(`[Dispatch] Worker ${worker.id} verified in ${elapsed}ms.`);
+                        if (worker.id === 'claude' || worker.id === 'gemini') await injectObserver(page, worker.id);
+                        return { id: worker.id, status: 'sent', elapsed_ms: elapsed };
+
+                    } catch (e) {
+                        logInternal(`[Dispatch] Worker ${worker.id} failed attempt ${retryCount + 1}: ${e.message}`);
+                        if (retryCount < MAX_DISPATCH_RETRIES) {
+                            retryCount++;
+                            await pages[worker.id]?.close().catch(() => { });
+                            globalPagePool[worker.id] = null;
+                            await delay(2000);
+                            return await attemptDispatch();
+                        }
+                        if (pages[worker.id]) await pages[worker.id].close().catch(() => { });
+                        return { id: worker.id, status: 'error', error: e.message };
                     }
+                };
 
-                    if (!inputSuccess) throw new Error('Input/Send verification failed after retries');
-                    return { id: worker.id, status: 'sent' };
-
-                } catch (e) {
-                    logInternal(`[Dispatch] Worker ${worker.id} failed: ${e.message}`);
-                    if (pages[worker.id]) await pages[worker.id].close().catch(() => { });
-                    return { id: worker.id, status: 'error', error: e.message };
-                }
+                return await attemptDispatch();
             };
 
             // Parallel Dispatch with Concurrency Pool (Limit: 3)
@@ -916,120 +857,152 @@ const workers = [
             // 2. Collection Phase: Scrape results from open pages (PARALLEL for Performance)
             logInternal('[Agency] Phase 2: Parallel Collection...');
 
-            // Helper to collect
+            // Helper to collect with RETRY logic
             const collectResult = async (worker) => {
-                const page = pages[worker.id];
-                if (!page) return { id: worker.id, value: `Error: Dispatch failed` };
+                const startTime = Date.now();
+                let retryCount = 0;
+                const MAX_COLLECT_RETRIES = 1;
 
-                const dispatchStatus = dispatchResults.find(r => r.id === worker.id);
-                if (dispatchStatus && dispatchStatus.status === 'error') {
-                    await page.close().catch(() => { });
-                    return { id: worker.id, value: `Error: ${dispatchStatus.error}` };
-                }
+                const attemptCollection = async () => {
+                    const page = pages[worker.id];
+                    if (!page) return { id: worker.id, value: `Error: Dispatch failed` };
 
-                logInternal(`[Collect] Worker ${worker.id} reading response...`);
-                onProgress({ status: 'streaming', service: worker.id, content: '(응답 수신 대기 중...)' });
-
-                try {
-                    // Step 2.3: Wait for response container before extraction
-                    const containerSel = getResponseRoot(worker.id);
-                    if (containerSel && containerSel !== 'body') {
-                        await page.waitForSelector(containerSel, { timeout: 8000 }).catch(() => {
-                            logInternal(`[Collect] Wait for ${worker.id} container ${containerSel} timed out.`);
-                        });
+                    const dispatchStatus = dispatchResults.find(r => r.id === worker.id);
+                    if (dispatchStatus && dispatchStatus.status === 'error') {
+                        await page.close().catch(() => { });
+                        return { id: worker.id, value: `Error: ${dispatchStatus.error}` };
                     }
 
-                    if (worker.id === 'gemini') {
-                        await page.waitForSelector('model-response .model-response-text, model-response [data-testid=\"response-content\"], response-container .markdown', { timeout: 15000 }).catch(() => {
-                            logInternal('[Collect] Wait for gemini response text timed out.');
-                        });
-                    }
+                    logInternal(`[Collect] Worker ${worker.id} reading response (Attempt ${retryCount + 1})...`);
+                    onProgress({ status: 'streaming', service: worker.id, content: '(응답 수신 대기 중...)' });
 
-                    let lastText = "";
-                    let stableCount = 0;
-                    const minLength = worker.id === 'perplexity' ? 50 : 15;
-                    const maxIters = SERVICE_MAX_WAIT[worker.id] / 2000;
+                    try {
+                        // Step 2.3: Wait for response container before extraction
+                        const containerSel = getResponseRoot(worker.id);
+                        if (containerSel && containerSel !== 'body') {
+                            await page.waitForSelector(containerSel, { timeout: 12000 }).catch(() => {
+                                logInternal(`[Collect] Wait for ${worker.id} container ${containerSel} timed out.`);
+                            });
+                        }
 
-                    for (let i = 0; i < maxIters; i++) {
-                        await delay(2000);
-                        let candidate = null;
-
-                        // Extraction Logic
                         if (worker.id === 'gemini') {
-                            if (await isGeminiStopped(page)) {
-                                const resent = await resendGemini(page, worker);
-                                if (!resent) throw new Error('gemini_stopped');
-                                await delay(1500);
-                                if (await isGeminiStopped(page)) throw new Error('gemini_stopped');
-                            }
-                            candidate = await getGeminiResponseText(page);
-                        } else if (worker.id === 'claude') {
-                            candidate = await getClaudeResponseText(page);
-                        } else if (worker.id === 'chatgpt') {
-                            candidate = await getChatGPTResponseText(page);
-                            if (!candidate) {
+                            await page.waitForSelector('model-response .model-response-text, model-response [data-testid=\"response-content\"], response-container .markdown', { timeout: 15000 }).catch(() => {
+                                logInternal('[Collect] Wait for gemini response text timed out.');
+                            });
+                        }
+
+                        let lastText = "";
+                        let stableCount = 0;
+                        const minLength = worker.id === 'perplexity' ? 120 : 30; // Increased minLength for Perplexity
+                        const targetStableCount = (worker.id === 'gemini' || worker.id === 'claude') ? 4 : 3;
+                        const maxIters = SERVICE_MAX_WAIT[worker.id] / 2000;
+
+                        for (let i = 0; i < maxIters; i++) {
+                            await delay(2000);
+                            let candidate = null;
+
+                            // Gemini Stop/Stop Detection
+                            const isGenerating = await page.evaluate(() => {
+                                const stopSelectors = [
+                                    'button[aria-label*="Stop"]', 'button[aria-label*="중단"]',
+                                    'button[data-testid*="stop"]', '[aria-label="Stop generating"]',
+                                    'button[aria-label*="중지"]'
+                                ];
+                                return stopSelectors.some(sel => !!document.querySelector(sel));
+                            });
+
+                            // Extraction Logic
+                            if (worker.id === 'gemini') {
+                                if (await isGeminiStopped(page)) {
+                                    const resent = await resendGemini(page, worker);
+                                    if (!resent) throw new Error('gemini_stopped');
+                                    await delay(2000);
+                                    if (await isGeminiStopped(page)) throw new Error('gemini_stopped');
+                                }
+                                candidate = await getGeminiResponseText(page);
+                            } else if (worker.id === 'claude') {
+                                candidate = await getClaudeResponseText(page);
+                            } else if (worker.id === 'chatgpt') {
+                                candidate = await getChatGPTResponseText(page);
+                                if (!candidate) {
+                                    const resultSels = Array.isArray(worker.result) ? worker.result : [worker.result];
+                                    candidate = await getCleanText(page, resultSels);
+                                }
+                            } else {
                                 const resultSels = Array.isArray(worker.result) ? worker.result : [worker.result];
                                 candidate = await getCleanText(page, resultSels);
                             }
-                        } else {
-                            const resultSels = Array.isArray(worker.result) ? worker.result : [worker.result];
-                            candidate = await getCleanText(page, resultSels);
-                        }
 
-                        // Sanitization
-                        if (worker.id === 'claude') candidate = sanitizeClaudeOutput(candidate);
-                        if (worker.id === 'perplexity') candidate = sanitizePerplexityOutput(candidate);
-                        if (worker.id === 'gemini') candidate = sanitizeGeminiOutput(candidate, worker.prompt);
+                            // Sanitization
+                            if (worker.id === 'claude') candidate = sanitizeClaudeOutput(candidate);
+                            if (worker.id === 'perplexity') candidate = sanitizePerplexityOutput(candidate);
+                            if (worker.id === 'gemini') candidate = sanitizeGeminiOutput(candidate, worker.prompt);
 
-                        if (looksLikeUiNoise(candidate)) {
-                            candidate = null;
-                        }
+                            if (looksLikeUiNoise(candidate)) candidate = null;
 
-                        const isThinking = (!candidate || candidate.length < minLength);
-
-                        // Streaming Update
-                        if (candidate && candidate.trim().length > 0) {
-                            if (candidate !== lastText) {
-                                lastText = candidate;
-                                stableCount = 0;
-                                onProgress({ status: 'streaming', service: worker.id, content: lastText });
-                            } else {
-                                stableCount++;
+                            // Streaming Update
+                            if (candidate && candidate.trim().length > 0) {
+                                if (candidate !== lastText) {
+                                    lastText = candidate;
+                                    stableCount = 0;
+                                    onProgress({ status: 'streaming', service: worker.id, content: lastText });
+                                } else {
+                                    stableCount++;
+                                }
                             }
+
+                            // Completion Condition
+                            const isCompleteEnough = lastText.length >= minLength;
+                            const isStable = stableCount >= targetStableCount;
+
+                            // Exit if stable and long enough, OR if not generating anymore and we have content
+                            if (isCompleteEnough && isStable) break;
+                            if (isCompleteEnough && !isGenerating && i > 5) break;
                         }
 
-                        // Completion Condition: Stable for 3 ticks (6s) AND sufficient length
-                        if (stableCount >= 3 && lastText.length >= minLength) break;
-                    }
-                    logInternal(`[Collect] Worker ${worker.id} finished: ${lastText.length} chars.`);
-                    if (looksLikeUiNoise(lastText)) {
-                        throw new Error('noisy_output');
-                    }
-                    await page.close();
-                    return { id: worker.id, value: lastText };
-                } catch (e) {
-                    // SNAPSHOT ON ERROR
-                    const ts = Date.now();
-                    try {
-                        await page.screenshot({ path: `debug_${worker.id}_collect_${ts}.png`, fullPage: false }).catch(() => { });
-                        const html = await page.content().catch(() => { });
-                        if (html) fs.writeFileSync(`debug_${worker.id}_collect_${ts}.html`, html);
-                    } catch (_) { }
+                        if (lastText.length < minLength) throw new Error('short_output');
+                        if (looksLikeUiNoise(lastText)) throw new Error('noisy_output');
 
-                    await page.close().catch(() => { });
-                    globalPagePool[worker.id] = null; // Remove from pool if error
+                        const elapsed = Date.now() - startTime;
+                        logInternal(`[Collect] Worker ${worker.id} finished: ${lastText.length} chars in ${elapsed}ms.`);
+                        await page.close().catch(() => { });
+                        return { id: worker.id, value: lastText };
 
-                    let errMsg = e.message;
-                    if (errMsg === 'noisy_output') {
-                        errMsg = '결과물에 UI 잡음이 너무 많습니다 (로그인 필요 또는 세션 만료 의심)';
-                    } else if (errMsg === 'gemini_stopped') {
-                        errMsg = 'Gemini 응답이 중단되었습니다 (대답이 중지되었습니다)';
+                    } catch (e) {
+                        const errMsg = e.message;
+                        logInternal(`[Collect] Worker ${worker.id} failed attempt ${retryCount + 1}: ${errMsg}`);
+
+                        if (retryCount < MAX_COLLECT_RETRIES) {
+                            retryCount++;
+                            // Simple retry: just wait a bit and try extraction again if possible, 
+                            // or re-navigate if it was a total failure. 
+                            // For now, let's just try the loop one more time.
+                            await delay(3000);
+                            return await attemptCollection();
+                        }
+
+                        // SNAPSHOT ON PERMANENT ERROR
+                        const ts = Date.now();
+                        const reason = errMsg.replace(/\s+/g, '_').toLowerCase();
+                        try {
+                            await page.screenshot({ path: `debug_${worker.id}_fail_${reason}_${ts}.png`, fullPage: false }).catch(() => { });
+                            const html = await page.content().catch(() => { });
+                            if (html) fs.writeFileSync(`debug_${worker.id}_fail_${reason}_${ts}.html`, html);
+                        } catch (_) { }
+
+                        await page.close().catch(() => { });
+                        globalPagePool[worker.id] = null;
+
+                        let userMsg = errMsg;
+                        if (errMsg === 'noisy_output') userMsg = 'UI 잡음 과다 (로그인 확인 필요)';
+                        if (errMsg === 'short_output') userMsg = '응답 길이 부족 (데이터 수집 실패)';
+                        if (errMsg === 'gemini_stopped') userMsg = 'Gemini 응답 중단됨';
+
+                        return { id: worker.id, value: `Error: ${userMsg}` };
                     }
-                    return { id: worker.id, value: `Error: ${errMsg}` };
-                }
-                // SUCCESS: Do NOT close page. Keep it for Page Pool reuse.
-                // await page.close(); 
-                return { id: worker.id, value: lastText };
+                };
+
+                return await attemptCollection();
             };
 
             // Run Collection in Parallel Batches (Concurrency 2 or 4)
