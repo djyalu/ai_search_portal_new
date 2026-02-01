@@ -419,6 +419,10 @@ async function waitForNotGenerating(page, timeoutMs = 10000) {
  */
 // Global Context for Reuse (Performance Breakthrough)
 let globalContext = null;
+let contextUsageCount = 0;
+let lastUsedTimestamp = Date.now();
+const CONTEXT_MAX_USAGE = 20;
+const CONTEXT_IDLE_TIMEOUT = 30 * 60 * 1000; // 30 mins
 const globalPagePool = {};
 
 export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
@@ -430,16 +434,30 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
         ...(options?.enabledAgents || {})
     };
 
-    // Performance: Reuse global context if available and healthy
+    // Performance: Reuse global context if available and healthy (Item 6: Lifecycle Management)
+    const now = Date.now();
     if (globalContext) {
-        try {
-            // Simple check if alive
-            if (globalContext.pages().length >= 0) {
-                logInternal('[Performance] Reusing existing global browser context.');
-            } else {
-                globalContext = null; // Reset if invalid
-            }
-        } catch (e) { globalContext = null; }
+        const isExpired = contextUsageCount >= CONTEXT_MAX_USAGE;
+        const isIdle = (now - lastUsedTimestamp) > CONTEXT_IDLE_TIMEOUT;
+
+        if (isExpired || isIdle) {
+            logInternal(`[Performance] Context lifecycle end (Usage: ${contextUsageCount}, Idle: ${isIdle}). Resetting...`);
+            try { await globalContext.close(); } catch (e) { }
+            globalContext = null;
+            contextUsageCount = 0;
+            // Clear page pool
+            Object.keys(globalPagePool).forEach(key => delete globalPagePool[key]);
+        } else {
+            try {
+                if (globalContext.pages().length >= 0) {
+                    logInternal(`[Performance] Reusing global context (Usage: ${contextUsageCount + 1}/${CONTEXT_MAX_USAGE}).`);
+                    contextUsageCount++;
+                    lastUsedTimestamp = now;
+                } else {
+                    globalContext = null;
+                }
+            } catch (e) { globalContext = null; }
+        }
     }
 
     const headlessAttempts = BROWSER_HEADLESS ? [true, false] : [false];
@@ -476,8 +494,8 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
                 // RESOURCE BLOCKING (Perf Boost)
                 await browserContext.route('**/*', (route) => {
                     const type = route.request().resourceType();
-                    // Block images, fonts, media to prioritize text
-                    if (['image', 'font', 'media'].includes(type)) {
+                    // Item 7: Selective blocking. Keep fonts for better UI rendering stability
+                    if (['image', 'media'].includes(type)) {
                         return route.abort();
                     }
                     return route.continue();
@@ -1037,18 +1055,24 @@ export async function runExhaustiveAnalysis(prompt, onProgress, options = {}) {
                                 candidate = await getCleanText(page, resultSels);
                             }
 
-                            // Sanitization
-                            if (worker.id === 'claude') candidate = sanitizeClaudeOutput(candidate);
-                            if (worker.id === 'perplexity') candidate = sanitizePerplexityOutput(candidate);
-                            if (worker.id === 'gemini') candidate = sanitizeGeminiOutput(candidate, worker.prompt);
+                            // Item 8: Sanitization Optimization - Only sanitize if changed
+                            let sanitized = null;
+                            if (candidate && candidate !== lastText) {
+                                let c = candidate;
+                                if (worker.id === 'claude') c = sanitizeClaudeOutput(c);
+                                else if (worker.id === 'perplexity') c = sanitizePerplexityOutput(c);
+                                else if (worker.id === 'gemini') c = sanitizeGeminiOutput(c, worker.prompt);
+                                else c = sanitizeCommonNoise(c);
 
-                            if (looksLikeUiNoise(candidate)) candidate = null;
+                                if (!looksLikeUiNoise(c)) sanitized = c;
+                            } else if (candidate === lastText) {
+                                sanitized = lastText; // Reuse last sanitized if no change
+                            }
 
-                            // Streaming Update
-                            if (candidate && candidate.trim().length > 0) {
-                                nullCounter = 0; // Reset on valid text
-                                if (candidate !== lastText) {
-                                    lastText = candidate;
+                            if (sanitized && sanitized.trim().length > 0) {
+                                nullCounter = 0;
+                                if (sanitized !== lastText) {
+                                    lastText = sanitized;
                                     stableCount = 0;
                                     onProgress({ status: 'streaming', service: worker.id, content: lastText });
                                 } else {

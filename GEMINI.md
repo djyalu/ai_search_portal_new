@@ -301,3 +301,11 @@
   - **Claude Extraction v2**: Restricted scraping to assistant-role message blocks to eliminate UI noise.
   - **Full Korean UX**: Standardized all remaining English labels and placeholders to Korean.
 - **Status**: Completed
+
+### Phase 47: Advanced Performance & Lifecycle (v4.9)
+- **Date**: 2026-02-01
+- **Action**: 
+  - **Context Lifecycle**: Implemented reset logic for `globalContext` (20 runs or 30m idle) to prevent memory leaks.
+  - **Selective Blocking**: Unblocked fonts while keeping images/media blocked to improve UI stability.
+  - **Sanitization Optimization**: Optimized scraping loop to skip redundant sanitization when text remains unchanged.
+- **Status**: Completed
