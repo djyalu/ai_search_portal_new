@@ -264,3 +264,21 @@
   - **Gemini Completion**: Refined completion criteria (Stop button + Stability count 4) to ensure high-quality scraping.
   - **Observability**: Standardized logging with `elapsed_ms` and failure-reason-coded snapshots (short, noisy, timeout).
 - **Status**: Completed
+
+### Phase 43: Strategic Intelligence Reporting Engine (v4.0)
+- **Date**: 2026-02-01
+- **Action**: 
+  - **Consulting Prompt Upgrade**: Implemented McKinsey-style strategic synthesis prompt (EVIDENCE HIERARCHY, NUMERIC LOCK).
+  - **Quality Validation**: Introduced `report_schema.js` and `report_validator.js` for automated QA scoring.
+  - **Premium UI/Export**: Applied consulting-grade CSS styles to report view and PDF/HTML exports (striped tables, bold navy typography).
+  - **Structure Enforcement**: Mandated Executive Summary, Causal Chain, and Scenario Planning sections.
+- **Status**: Completed
+
+### Phase 44: Performance Acceleration (v4.2)
+- **Date**: 2026-02-01
+- **Action**: 
+  - **Reasoning Cache**: Implemented memory-based cache for analysis strategies to skip redundant Perplexity runs.
+  - **Tighter Timeouts**: Reduced Reasoning timeout to 10s and navigation timeouts.
+  - **Early Termination**: Added `isFinalSentence` logic to `collectResult` to finish scraping as soon as a stable, complete answer is detected.
+  - **Concurrency Boost**: Increased dispatch batch size to 4 for full parallel worker initialization.
+- **Status**: Completed
